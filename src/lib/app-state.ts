@@ -11,7 +11,9 @@ function emitter() {
   return {
     on(cb: () => void) {
       listeners.add(cb);
-      return () => listeners.delete(cb);
+      return () => {
+        listeners.delete(cb);
+      };
     },
     fire() {
       listeners.forEach((cb) => cb());
