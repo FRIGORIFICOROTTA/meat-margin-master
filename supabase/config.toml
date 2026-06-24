@@ -1,1 +1,2 @@
-project_id = "wzzpybquxllpjrehkunv"
+[functions.extract-financial-data]
+verify_jwt = true
