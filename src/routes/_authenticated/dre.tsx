@@ -1,10 +1,16 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useEmpresaSelecionada, usePeriodo } from "@/lib/app-state";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { fmtBRL, fmtPct, mesNome } from "@/lib/finance";
 import { cn } from "@/lib/utils";
+import { calcularDREFiscal, REGIME_LABEL, type RegimeTributario, type ConfigTributaria } from "@/lib/fiscal";
+import { exportDREPdf, exportDREExcel, type LinhaExport } from "@/lib/export-utils";
+import { FileDown, FileSpreadsheet } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/dre")({
   component: DrePage,
@@ -13,11 +19,17 @@ export const Route = createFileRoute("/_authenticated/dre")({
 function DrePage() {
   const [empresaId] = useEmpresaSelecionada();
   const [periodo] = usePeriodo();
+  const [modo, setModo] = useState<"gerencial" | "fiscal">("gerencial");
 
   const dreQ = useQuery({
     queryKey: ["dre-full", empresaId, periodo.mes, periodo.ano],
     enabled: !!empresaId,
     queryFn: async () => {
+      const { data: empresa } = await supabase
+        .from("empresas")
+        .select("id, nome, cnpj, regime_tributario, config_tributaria")
+        .eq("id", empresaId!)
+        .maybeSingle();
       const { data: dre } = await supabase
         .from("dre_mensal")
         .select("*")
@@ -26,18 +38,18 @@ function DrePage() {
         .eq("ano", periodo.ano)
         .is("deleted_at", null)
         .maybeSingle();
-      if (!dre) return null;
+      if (!dre) return { empresa, dre: null, despesas: [] as any[] };
       const { data: despesas } = await supabase
         .from("despesas_detalhe")
         .select("*")
         .eq("dre_id", dre.id);
-      return { dre, despesas: despesas ?? [] };
+      return { empresa, dre, despesas: despesas ?? [] };
     },
   });
 
   if (!empresaId) return <p className="text-muted-foreground">Selecione uma empresa.</p>;
   if (dreQ.isLoading) return <p className="text-muted-foreground">Carregando...</p>;
-  if (!dreQ.data) {
+  if (!dreQ.data?.dre) {
     return (
       <div className="rounded border bg-card p-8 text-center text-muted-foreground">
         Nenhuma DRE para {mesNome(periodo.mes)}/{periodo.ano}. Vá em <strong>Importar</strong> para começar.
@@ -45,16 +57,119 @@ function DrePage() {
     );
   }
 
-  const { dre, despesas } = dreQ.data;
+  const { empresa, dre, despesas } = dreQ.data;
+  const regime = (empresa?.regime_tributario as RegimeTributario) ?? "simples";
+  const fiscal = calcularDREFiscal(
+    {
+      total_vendas: Number(dre.total_vendas),
+      cmv: Number(dre.cmv),
+      variacao_estoque: Number(dre.variacao_estoque),
+      total_despesas: Number(dre.total_despesas),
+      devolucoes: Number(dre.devolucoes ?? 0),
+    },
+    regime,
+    (empresa?.config_tributaria as ConfigTributaria | null) ?? null,
+  );
+
   const v = Number(dre.total_vendas);
   const pct = (n: number) => (v > 0 ? n / v : 0);
 
+  const linhasGerencial: LinhaExport[] = [
+    { label: "Receita Bruta (Vendas)", valor: v, pct: 1, bold: true },
+    { label: "(-) CMV do sistema", valor: -Number(dre.cmv), pct: pct(-Number(dre.cmv)) },
+    { label: "(±) Variação de Estoque", valor: -Number(dre.variacao_estoque), pct: pct(-Number(dre.variacao_estoque)) },
+    {
+      label: "= Resultado Bruto Ajustado",
+      valor: Number(dre.resultado_bruto) - Number(dre.variacao_estoque),
+      pct: pct(Number(dre.resultado_bruto) - Number(dre.variacao_estoque)),
+      bold: true,
+    },
+    ...despesas.map((d: any) => ({
+      label: `${d.categoria}${d.subcategoria ? ` · ${d.subcategoria}` : ""}`,
+      valor: -Number(d.valor),
+      pct: pct(-Number(d.valor)),
+    })),
+    { label: "(-) Total Despesas", valor: -Number(dre.total_despesas), pct: pct(-Number(dre.total_despesas)) },
+    {
+      label: "= Resultado Líquido Gerencial",
+      valor: Number(dre.resultado_liquido_gerencial),
+      pct: pct(Number(dre.resultado_liquido_gerencial)),
+      bold: true,
+    },
+  ];
+
+  const linhasFiscal: LinhaExport[] = [
+    { label: "Receita Bruta", valor: fiscal.receita_bruta, pct: 1, bold: true },
+    ...(fiscal.devolucoes ? [{ label: "(-) Devoluções", valor: -fiscal.devolucoes, pct: pct(-fiscal.devolucoes) }] : []),
+    ...fiscal.impostos_breakdown.map((i) => ({ label: `(-) ${i.label}`, valor: -i.valor, pct: pct(-i.valor) })),
+    { label: "= Receita Líquida", valor: fiscal.receita_liquida, pct: pct(fiscal.receita_liquida), bold: true },
+    { label: "(-) CMV ajustado (com var. estoque)", valor: -fiscal.cmv_ajustado, pct: pct(-fiscal.cmv_ajustado) },
+    { label: "= Lucro Bruto", valor: fiscal.lucro_bruto, pct: pct(fiscal.lucro_bruto), bold: true },
+    { label: "(-) Despesas Operacionais", valor: -fiscal.despesas_operacionais, pct: pct(-fiscal.despesas_operacionais) },
+    { label: "= Lucro antes IR/CSLL", valor: fiscal.lucro_antes_ir, pct: pct(fiscal.lucro_antes_ir), bold: true },
+    ...(fiscal.irpj ? [{ label: "(-) IRPJ", valor: -fiscal.irpj, pct: pct(-fiscal.irpj) }] : []),
+    ...(fiscal.csll ? [{ label: "(-) CSLL", valor: -fiscal.csll, pct: pct(-fiscal.csll) }] : []),
+    {
+      label: "= Resultado Líquido Fiscal",
+      valor: fiscal.resultado_liquido_fiscal,
+      pct: pct(fiscal.resultado_liquido_fiscal),
+      bold: true,
+    },
+  ];
+
+  const linhas = modo === "gerencial" ? linhasGerencial : linhasFiscal;
+  const modoLabel = modo === "gerencial" ? "Gerencial" : "Fiscal";
+
+  function onPdf() {
+    exportDREPdf({
+      empresa: empresa?.nome ?? "Empresa",
+      cnpj: empresa?.cnpj ?? null,
+      mes: periodo.mes,
+      ano: periodo.ano,
+      modo: modoLabel,
+      linhas,
+    });
+  }
+  function onXlsx() {
+    exportDREExcel({
+      empresa: empresa?.nome ?? "Empresa",
+      mes: periodo.mes,
+      ano: periodo.ano,
+      modo: modoLabel,
+      dre: linhas,
+      despesas: despesas.map((d: any) => ({
+        categoria: d.categoria,
+        subcategoria: d.subcategoria,
+        valor: Number(d.valor),
+      })),
+    });
+  }
+
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="text-2xl font-bold">DRE Gerencial</h1>
-        <p className="text-sm text-muted-foreground">{mesNome(periodo.mes)}/{periodo.ano}</p>
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h1 className="text-2xl font-bold">DRE {modoLabel}</h1>
+          <p className="text-sm text-muted-foreground">
+            {empresa?.nome} · {mesNome(periodo.mes)}/{periodo.ano} · {REGIME_LABEL[regime]}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Tabs value={modo} onValueChange={(v) => setModo(v as any)}>
+            <TabsList>
+              <TabsTrigger value="gerencial">Gerencial</TabsTrigger>
+              <TabsTrigger value="fiscal">Fiscal</TabsTrigger>
+            </TabsList>
+          </Tabs>
+          <Button variant="outline" size="sm" onClick={onPdf}>
+            <FileDown className="h-4 w-4 mr-1" /> PDF
+          </Button>
+          <Button variant="outline" size="sm" onClick={onXlsx}>
+            <FileSpreadsheet className="h-4 w-4 mr-1" /> Excel
+          </Button>
+        </div>
       </div>
+
       <Card>
         <CardHeader>
           <CardTitle>Demonstrativo</CardTitle>
@@ -69,67 +184,61 @@ function DrePage() {
               </tr>
             </thead>
             <tbody>
-              <Linha label="Receita Bruta (Vendas)" valor={Number(dre.total_vendas)} pct={1} section />
-              <Linha label="(-) CMV do sistema" valor={-Number(dre.cmv)} pct={pct(-Number(dre.cmv))} />
-              <Linha
-                label="(±) Variação de Estoque"
-                valor={-Number(dre.variacao_estoque)}
-                pct={pct(-Number(dre.variacao_estoque))}
-                accent={Number(dre.variacao_estoque) > 0 ? "danger" : Number(dre.variacao_estoque) < 0 ? "success" : undefined}
-                hint={Number(dre.variacao_estoque) > 0 ? "Consumo > compras" : Number(dre.variacao_estoque) < 0 ? "Acúmulo de estoque" : undefined}
-              />
-              <Linha
-                label="= Resultado Bruto Ajustado"
-                valor={Number(dre.resultado_bruto) - Number(dre.variacao_estoque)}
-                pct={pct(Number(dre.resultado_bruto) - Number(dre.variacao_estoque))}
-                section
-              />
-              <tr><td colSpan={3} className="p-3 text-xs uppercase text-muted-foreground bg-secondary/40">Despesas operacionais</td></tr>
-              {despesas.map((d) => (
-                <Linha
-                  key={d.id}
-                  label={`${d.categoria}${d.subcategoria ? ` · ${d.subcategoria}` : ""}`}
-                  valor={-Number(d.valor)}
-                  pct={pct(-Number(d.valor))}
-                  indent
-                />
+              {linhas.map((l, i) => (
+                <tr key={i} className={cn("border-b", l.bold && "bg-secondary/50 font-semibold")}>
+                  <td className="p-3">{l.label}</td>
+                  <td
+                    className={cn(
+                      "p-3 text-right tabular-nums",
+                      l.bold && l.label.startsWith("=") && l.valor >= 0 && "text-success",
+                      l.bold && l.label.startsWith("=") && l.valor < 0 && "text-destructive",
+                    )}
+                  >
+                    {fmtBRL(l.valor)}
+                  </td>
+                  <td className="p-3 text-right text-xs text-muted-foreground tabular-nums">
+                    {l.pct != null ? fmtPct(l.pct) : ""}
+                  </td>
+                </tr>
               ))}
-              <Linha label="(-) Total Despesas" valor={-Number(dre.total_despesas)} pct={pct(-Number(dre.total_despesas))} />
-              <Linha
-                label="= Resultado Líquido Gerencial"
-                valor={Number(dre.resultado_liquido_gerencial)}
-                pct={pct(Number(dre.resultado_liquido_gerencial))}
-                section
-                accent={Number(dre.resultado_liquido_gerencial) >= 0 ? "success" : "danger"}
-              />
             </tbody>
           </table>
         </CardContent>
       </Card>
+
+      {modo === "fiscal" && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm">Comparativo Gerencial × Fiscal</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-3 gap-4 text-sm">
+              <Comp label="Gerencial" valor={Number(dre.resultado_liquido_gerencial)} />
+              <Comp label="Fiscal" valor={fiscal.resultado_liquido_fiscal} />
+              <Comp
+                label="Diferença"
+                valor={fiscal.resultado_liquido_fiscal - Number(dre.resultado_liquido_gerencial)}
+              />
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }
 
-function Linha({
-  label, valor, pct, section, accent, indent, hint,
-}: {
-  label: string; valor: number; pct: number;
-  section?: boolean; accent?: "success" | "danger"; indent?: boolean; hint?: string;
-}) {
+function Comp({ label, valor }: { label: string; valor: number }) {
   return (
-    <tr className={cn("border-b", section && "bg-secondary/50 font-semibold")}>
-      <td className={cn("p-3", indent && "pl-8")}>
-        {label}
-        {hint && <span className="ml-2 text-xs text-muted-foreground">({hint})</span>}
-      </td>
-      <td className={cn(
-        "p-3 text-right tabular-nums",
-        accent === "success" && "text-success",
-        accent === "danger" && "text-destructive",
-      )}>
+    <div className="rounded border p-3">
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div
+        className={cn(
+          "text-lg font-semibold tabular-nums",
+          valor >= 0 ? "text-success" : "text-destructive",
+        )}
+      >
         {fmtBRL(valor)}
-      </td>
-      <td className="p-3 text-right text-xs text-muted-foreground tabular-nums">{fmtPct(pct)}</td>
-    </tr>
+      </div>
+    </div>
   );
 }
