@@ -11,8 +11,14 @@ import { Label } from "@/components/ui/label";
 import { sha256Hex, mesNome } from "@/lib/finance";
 import { toast } from "sonner";
 import {
-  FileText, CheckCircle2, AlertCircle, Loader2, RefreshCw, ScanLine,
+  FileText, CheckCircle2, AlertCircle, Loader2, RefreshCw, ScanLine, CalendarClock, Trash2,
 } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 import type { Database } from "@/integrations/supabase/types";
 import { DreEditor, emptyDreValues, type DreFormValues } from "@/components/DreEditor";
