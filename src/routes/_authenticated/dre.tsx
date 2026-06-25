@@ -99,8 +99,8 @@ function DrePage() {
     { label: "(-) Total Despesas", valor: -Number(dre.total_despesas), pct: pct(-Number(dre.total_despesas)) },
     {
       label: "= Resultado Líquido Gerencial",
-      valor: Number(dre.resultado_liquido_gerencial),
-      pct: pct(Number(dre.resultado_liquido_gerencial)),
+      valor: Number(dre.resultado_bruto) - Number(dre.variacao_estoque) - Number(dre.total_despesas),
+      pct: pct(Number(dre.resultado_bruto) - Number(dre.variacao_estoque) - Number(dre.total_despesas)),
       bold: true,
     },
   ];
