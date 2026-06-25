@@ -118,7 +118,8 @@ function DrePage() {
     ...(fiscal.devolucoes ? [{ label: "(-) Devoluções", valor: -fiscal.devolucoes, pct: pct(-fiscal.devolucoes) }] : []),
     ...fiscal.impostos_breakdown.map((i) => ({ label: `(-) ${i.label}`, valor: -i.valor, pct: pct(-i.valor) })),
     { label: "= Receita Líquida", valor: fiscal.receita_liquida, pct: pct(fiscal.receita_liquida), bold: true },
-    { label: "(-) CMV ajustado (com var. estoque)", valor: -fiscal.cmv_ajustado, pct: pct(-fiscal.cmv_ajustado) },
+    { label: "(-) CMV do sistema", valor: -fiscal.cmv, pct: pct(-fiscal.cmv) },
+    { label: "(±) Variação de Estoque", valor: -fiscal.variacao_estoque, pct: pct(-fiscal.variacao_estoque) },
     { label: "= Lucro Bruto", valor: fiscal.lucro_bruto, pct: pct(fiscal.lucro_bruto), bold: true },
     { label: "(-) Despesas Operacionais", valor: -fiscal.despesas_operacionais, pct: pct(-fiscal.despesas_operacionais) },
     { label: "= Lucro antes IR/CSLL", valor: fiscal.lucro_antes_ir, pct: pct(fiscal.lucro_antes_ir), bold: true },
@@ -131,6 +132,7 @@ function DrePage() {
       bold: true,
     },
   ];
+
 
   const linhas = modo === "gerencial" ? linhasGerencial : linhasFiscal;
   const modoLabel = modo === "gerencial" ? "Gerencial" : "Fiscal";
