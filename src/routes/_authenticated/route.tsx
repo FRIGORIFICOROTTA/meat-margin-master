@@ -108,6 +108,9 @@ function AuthLayout() {
             <NavLink to="/despesas" icon={<Receipt className="h-4 w-4" />}>
               Despesas
             </NavLink>
+            <NavLink to="/fiscal" icon={<Landmark className="h-4 w-4" />}>
+              Fiscal
+            </NavLink>
             <NavLink to="/estoque" icon={<Boxes className="h-4 w-4" />}>
               Estoque
             </NavLink>
