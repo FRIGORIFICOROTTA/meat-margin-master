@@ -168,6 +168,9 @@ function DrePage() {
               <TabsTrigger value="fiscal">Fiscal</TabsTrigger>
             </TabsList>
           </Tabs>
+          <Button variant="default" size="sm" onClick={() => setEditing(true)}>
+            <Pencil className="h-4 w-4 mr-1" /> Editar
+          </Button>
           <Button variant="outline" size="sm" onClick={onPdf}>
             <FileDown className="h-4 w-4 mr-1" /> PDF
           </Button>
@@ -175,6 +178,7 @@ function DrePage() {
             <FileSpreadsheet className="h-4 w-4 mr-1" /> Excel
           </Button>
         </div>
+
       </div>
 
       <Card>
