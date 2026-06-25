@@ -238,7 +238,128 @@ function DrePage() {
   );
 }
 
-function Comp({ label, valor }: { label: string; valor: number }) {
+
+      <EditDreDialog
+        open={editing}
+        onOpenChange={setEditing}
+        empresaId={empresaId}
+        mes={periodo.mes}
+        ano={periodo.ano}
+        initial={{
+          total_vendas: Number(dre.total_vendas) || 0,
+          devolucoes: Number(dre.devolucoes ?? 0) || 0,
+          cmv: Number(dre.cmv) || 0,
+          total_despesas: Number(dre.total_despesas) || 0,
+          estoque_inicial: Number(dre.estoque_inicial_valor ?? 0) || 0,
+          estoque_final: Number(dre.estoque_final_valor ?? 0) || 0,
+          despesas: despesas.map((d: any) => ({
+            categoria: d.categoria,
+            subcategoria: d.subcategoria,
+            valor: Number(d.valor) || 0,
+          })),
+        }}
+        onSaved={() => {
+          setEditing(false);
+          qc.invalidateQueries({ queryKey: ["dre-full"] });
+          qc.invalidateQueries();
+        }}
+      />
+    </div>
+  );
+}
+
+function EditDreDialog({
+  open,
+  onOpenChange,
+  empresaId,
+  mes,
+  ano,
+  initial,
+  onSaved,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  empresaId: string;
+  mes: number;
+  ano: number;
+  initial: DreFormValues;
+  onSaved: () => void;
+}) {
+  const [form, setForm] = useState<DreFormValues>(initial);
+  useEffect(() => {
+    if (open) setForm(initial);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  const saveMut = useMutation({
+    mutationFn: async () => {
+      const totalDespesas = form.despesas.reduce((s, d) => s + (Number(d.valor) || 0), 0);
+      const resultadoBruto = form.total_vendas - form.devolucoes - form.cmv;
+      const variacao = form.estoque_inicial - form.estoque_final;
+      const resultadoLiq = resultadoBruto - totalDespesas;
+      const { data: dreRow, error } = await supabase
+        .from("dre_mensal")
+        .upsert(
+          {
+            empresa_id: empresaId,
+            mes,
+            ano,
+            total_vendas: form.total_vendas,
+            devolucoes: form.devolucoes,
+            cmv: form.cmv,
+            resultado_bruto: resultadoBruto,
+            total_despesas: totalDespesas,
+            resultado_liquido_gerencial: resultadoLiq,
+            estoque_inicial_valor: form.estoque_inicial,
+            estoque_final_valor: form.estoque_final,
+            variacao_estoque: variacao,
+          },
+          { onConflict: "empresa_id,mes,ano" },
+        )
+        .select()
+        .single();
+      if (error) throw error;
+      await supabase.from("despesas_detalhe").delete().eq("dre_id", dreRow.id);
+      const despesas = form.despesas
+        .filter((d) => (Number(d.valor) || 0) > 0)
+        .map((d) => ({
+          dre_id: dreRow.id,
+          categoria: d.categoria,
+          subcategoria: d.subcategoria || null,
+          valor: Number(d.valor),
+          percentual_venda: form.total_vendas > 0 ? Number(d.valor) / form.total_vendas : null,
+        }));
+      if (despesas.length) await supabase.from("despesas_detalhe").insert(despesas);
+    },
+    onSuccess: () => {
+      toast.success("DRE atualizada.");
+      onSaved();
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : "Erro ao salvar"),
+  });
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Editar DRE — {mes}/{ano}</DialogTitle>
+        </DialogHeader>
+        <DreEditor values={form} onChange={setForm} />
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button>
+          <Button onClick={() => saveMut.mutate()} disabled={saveMut.isPending}>
+            {saveMut.isPending ? "Salvando..." : "Salvar alterações"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// Helper para evitar warning sobre uso de emptyDreValues — disponível para futuros lançamentos manuais.
+void emptyDreValues;
+
+
   return (
     <div className="rounded border p-3">
       <div className="text-xs text-muted-foreground">{label}</div>
