@@ -338,29 +338,29 @@ function parseEstoque(text: string): EstoqueParsed {
     lastEnd = matchStart + m[0].length;
     if (!window) continue;
 
-    // Código + descrição: pega o ÚLTIMO "dígito + texto" da janela.
-    // Isso descarta lixo residual de cabeçalho que tenha sobrado antes
-    // do item real (ex.: data, CNPJ, número do livro).
+    // Código + descrição: pega o ÚLTIMO "dígito + letra" da janela.
+    // Descarta lixo residual de cabeçalho que tenha sobrado antes do item real.
     let codigo: string | null = null;
     let produto = "";
-    const candRe = /(?:^|\s)(\d{1,8})\s+([A-Za-zÀ-ÿ][^]*?)(?=$)/g;
-    // Estratégia simples e robusta: itera todos os matches de "(\d{1,8})\s+<não-dígito>"
-    // ao longo da janela e mantém o último.
-    const iterRe = /(\d{1,8})\s+([A-Za-zÀ-ÿ][^\d][^]*?)(?=(?:\s+\d{1,8}\s+[A-Za-zÀ-ÿ])|$)/g;
-    let lastCand: RegExpExecArray | null = null;
-    for (const c of window.matchAll(iterRe)) lastCand = c as RegExpExecArray;
-    if (lastCand) {
-      codigo = lastCand[1];
-      produto = lastCand[2];
-    } else {
-      // fallback: primeiro dígito + resto
-      const fb = window.match(/(\d{1,8})\s+(.+)$/s);
-      if (fb) {
-        codigo = fb[1];
-        produto = fb[2];
+    const starts: number[] = [];
+    const startRe = /(?:^|\s)(\d{1,8})\s+(?=[A-Za-zÀ-ÿ])/g;
+    for (const c of window.matchAll(startRe)) {
+      // posição do dígito (após o espaço inicial, se houver)
+      const idx = (c.index ?? 0) + c[0].indexOf(c[1]);
+      starts.push(idx);
+    }
+    if (starts.length) {
+      const lastStart = starts[starts.length - 1];
+      const tail = window.slice(lastStart);
+      const m = tail.match(/^(\d{1,8})\s+(.+)$/s);
+      if (m) {
+        codigo = m[1];
+        produto = m[2];
       } else {
-        produto = window;
+        produto = tail;
       }
+    } else {
+      produto = window;
     }
     produto = produto.replace(/\s+/g, " ").trim();
     if (produto.length < 2) continue;
