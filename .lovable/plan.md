@@ -1,53 +1,53 @@
-## Problema
+## Diagnóstico
 
-O parser de DRE em `supabase/functions/extract-financial-data/index.ts` (função `parseDRE`) assume que o texto extraído do PDF tem quebras de linha (`\n`). O `unpdf` está devolvendo o PDF do VR System como uma única linha gigante. Com isso:
+Comparando o esperado com o atual no parser de estoque:
 
-- `text.split(/\r?\n/)` produz uma única "linha" com tudo
-- `captureNumberByLabel` chama `lastNumberInLine`, que retorna o **último** número do texto inteiro — no PDF de teste, é o "2" de "Página 2 de 2"
-- Por isso `total_vendas=2`, `cmv=2`, `resultado_líquido=2` e zero despesas
+| Arquivo | Itens esperados | Valor esperado | Detectado hoje | Diferença |
+|---|---|---|---|---|
+| Maio (final) | 313 | 58.594,72 | **313 / 58.594,72** ✅ | 0 |
+| Abril (inicial) | 318 | 69.203,23 | **317 / 69.140,39** | -1 item / -62,84 |
 
-Confirmado no banco: o último arquivo `DEMONSTRATIVO DE RESULTADO.pdf` (status `extraido`) salvou todos os campos = 2. Um arquivo mais antigo, cujo PDF tinha quebras de linha, foi extraído corretamente.
+Ou seja: **maio está 100% correto**. O problema é só no abril — o parser está deixando 1 item de fora cujo `valor_total` é R$ 62,84.
 
-## Correção
+### Causa provável (a confirmar com log)
 
-Reescrever `parseDRE` para ser **resiliente a texto sem quebras de linha**, no mesmo padrão que já fizemos no `parseEstoque`:
+O parser tem 3 pontos onde um item legítimo pode ser descartado:
 
-1. **Normalização**
-   - Colapsar NBSP, tabs, `\r`, `\n` em espaços únicos.
-   - Remover ruído repetido: `https://vrsystem.info`, `Página N de M`, cabeçalho "Demonstrativo de Resultado … hh:mm:ss", "Tipo data: …", linha de gráfico ("As porcentagens deste gráfico…").
+1. **Âncora regex** (`UNIDADE seguida de 3 números`) — exige `\b` antes da unidade. Itens cuja descrição termine colada na unidade (ex.: `...750ML UN01UN UNID 1,00 ...` — note o `UN01UN` na imagem) podem confundir o lookbehind e fazer o regex casar com `UN` em vez de `UNID`, "comendo" o item anterior.
+2. **Dedup key** = `codigo|valor_total|quantidade`. Se dois itens distintos têm mesmo código (caso raro mas possível em SKU repetido) **ou** se um item aparece com código `null`, a chave colide e o segundo é jogado fora.
+3. **Captura código+descrição**: pega o ÚLTIMO `dígito + letra` da janela. Quando a descrição do item *anterior* termina em número (ex.: `500G`, `750ML`, `200G`), esse número pode ser interpretado como "código" do item *seguinte*, deixando o item anterior sem código e fazendo o atual perder a descrição correta.
 
-2. **Captura de totais por âncora + número à frente**
-   - Para cada label (`Total Vendas`, `CMV / Custo das mercadorias vendidas`, `Resultado bruto`, `Total de despesas`, `Resultado líquido`, `Devoluções`), montar regex `/<label>\s*([\-\(]?\s*R?\$?\s*[\d.]+,\d{2}\)?)/i` que pega o **primeiro número logo após o rótulo**, em vez do último da linha.
-   - Para `Resultado bruto` e `Resultado líquido`, usar a **última** ocorrência (no PDF aparecem duas vezes: dentro e fora do detalhamento).
-   - Manter `parseBR` (já trata parênteses e sinal).
+O valor 62,84 não bate com nenhum item visível nas últimas linhas do PDF, então o item perdido está no meio do relatório.
 
-3. **Detalhamento de despesas**
-   - Recortar a região entre a âncora `Plano de conta Valor % Vnd` (ou `Despesas <valor> <pct>` inicial) e `Resultado bruto` (segunda ocorrência) / `Total de despesas`.
-   - Dentro dessa região, aplicar regex global `/([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9\/\-\. ]{2,40}?)\s+([\d.]+,\d{2})\s+([\d.]+,\d{2})(?=\s|$)/g` capturando triplas `(label, valor, %)`.
-   - Filtrar labels que sejam cabeçalhos/totais (`Despesas`, `Total de despesas`, `Resultado bruto`, `Resultado líquido`, `Plano de conta`, `Valor`, `% Vnd`).
-   - Manter `categorize(label)` existente.
+## Plano de correção
 
-4. **Período**
-   - Já há regex para `\d{2}\/20\d{2}`; ampliar para reconhecer também `De: 01/05/2026 até: 31/05/2026` e derivar `mes`/`ano` daí.
+### 1. Instrumentar para localizar o item perdido (1 deploy)
 
-5. **Compatibilidade**
-   - Manter o caminho atual funcionando para PDFs que vêm com quebras de linha (regex de label não depende da existência de `\n`).
+Em `supabase/functions/extract-financial-data/index.ts`, adicionar log SEMPRE (não só quando zero):
+- Total de âncoras (`anchorRe`) encontradas vs itens aceitos.
+- Lista dos descartes com motivo: `"qtd/vu/vt null"`, `"window vazia"`, `"produto < 2 chars"`, `"dedup key colidiu (key=...)"`.
+- Soma calculada vs `totalReportado` e a diferença.
 
-6. **Diagnóstico**
-   - Aumentar `__raw_preview` para 3000 caracteres (igual estoque) e, quando `total_vendas` ficar null, logar `text.slice(0, 1500)` no console da edge function.
+Pedir ao usuário para clicar em **"Forçar reprocessar"** no arquivo de abril e ler o log da função.
 
-## Validação
+### 2. Corrigir a(s) causa(s) identificada(s)
 
-- Reprocessar o arquivo `f9a31bac-7dac-4621-9352-d7949dbe41e1` ("DEMONSTRATIVO DE RESULTADO.pdf" maio/2026) com `force=true` e confirmar:
-  - `total_vendas = 418888.95`
-  - `cmv = 256552.64`
-  - `total_despesas = 59181.37`
-  - `resultado_liquido = 103154.94`
-  - 11 despesas detalhadas (Manutencao, Aluguel, Agua, Maquinas de cartao, Internet, Salarios, Vale Funcionario, Gratificações, Publicidade, Despesa de loja, Obras).
-- Reprocessar o outro arquivo (que já funcionava) e confirmar que continua igual — sem regressão.
+Dependendo do log, aplicar uma ou mais:
 
-## Arquivos tocados
+- **Dedup mais robusto**: trocar a chave por `${codigo}|${produto}|${vt}` (inclui descrição) — colisões só acontecem se for genuinamente o mesmo item.
+- **Âncora resiliente a `UN01UN`**: exigir que o caractere *anterior* à unidade não seja letra/dígito, e dar prioridade à unidade mais longa (`UNID` antes de `UN`) ordenando o regex `UNID|KG|PCT|PC|CX|LT|MT|DZ|GR|ML|UN|G|L` — já está nessa ordem, mas o `|` em regex é guloso da esquerda, então OK. O ajuste real é mudar `\b(${UNI})\b` para `(?<![A-Za-z0-9])(${UNI})(?=\\s)`.
+- **Detecção de código melhor**: aceitar como código apenas se a janela começar com `^\d{1,8}\s+[A-Za-zÀ-ÿ]` (não pegar dígitos no meio), e se não houver, deixar `codigo=null` mas ainda **manter o item** (o dedup acima já protege).
 
-- `supabase/functions/extract-financial-data/index.ts` — apenas `parseDRE` e helpers próximos. `parseEstoque` não é alterado.
+### 3. Validar
 
-Nada de mudança de schema, RLS, rotas ou UI.
+- Reprocessar abril → esperar **318 itens / 69.203,23**.
+- Reprocessar maio → continuar **313 / 58.594,72** (não regredir).
+- Mostrar no chat o diff antes/depois.
+
+### 4. UX (opcional, baixo custo)
+
+Na tela `/estoque`, exibir um aviso amarelo quando `itens.length` ≠ `total_itens reportado pelo PDF` ou quando `soma(itens) ≠ total_valor reportado`, para o usuário detectar discrepâncias futuras sem precisar abrir a função.
+
+## Entregável
+
+Um único deploy da edge function `extract-financial-data` com diagnóstico + correção, validado contra os dois PDFs reais.
