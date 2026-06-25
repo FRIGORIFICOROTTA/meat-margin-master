@@ -124,6 +124,25 @@ interface DreParsed {
 }
 
 function parseDRE(text: string): DreParsed {
+  // Normaliza: NBSP, tabs, quebras → espaço único.
+  let norm = text
+    .replace(/\u00A0/g, " ")
+    .replace(/[\t\r\n]+/g, " ")
+    .replace(/ +/g, " ")
+    .trim();
+
+  // Remove ruído repetido de cabeçalho/rodapé do VR System e similares.
+  norm = norm
+    .replace(/https?:\/\/\S+/gi, " ")
+    .replace(/P[aá]gina\s+\d+\s+de\s+\d+/gi, " ")
+    .replace(/Demonstrativo\s+de\s+Resultado\s+\d{1,2}\s+de\s+[a-zç]+\s+de\s+\d{4}\s+\d{1,2}:\d{2}(?::\d{2})?/gi, " ")
+    .replace(/Tipo\s+data:\s*[^A-Z]{0,40}?(?=[A-Z])/gi, " ")
+    .replace(/As\s+porcentagens\s+deste\s+gr[aá]fico[^.]*\.?/gi, " ")
+    .replace(/Plano\s+de\s+conta\s+Valor\s+%\s*Vnd/gi, " §PLANO§ ")
+    .replace(/ +/g, " ")
+    .trim();
+
+  // Mantém também 'lines' para retrocompatibilidade (PDFs com \n preservados).
   const lines = text
     .split(/\r?\n/)
     .map((l) => l.replace(/\s+/g, " ").trim())
@@ -131,80 +150,97 @@ function parseDRE(text: string): DreParsed {
 
   const warnings: string[] = [];
 
-  const total_vendas = captureNumberByLabel(lines, [
-    /receita\s+bruta/i,
-    /total\s+(de\s+)?vendas/i,
-    /\bvendas?\s+(brutas?|totais?)\b/i,
-    /faturament/i,
-  ]);
+  // Regex de número BR com 2 casas (formato consistente em DREs).
+  const BR_NUM = String.raw`\(?-?\s*R?\$?\s*[\d.]+,\d{2}\)?`;
 
-  const devolucoes = captureNumberByLabel(lines, [
-    /devolu[cç][oõ]es/i,
-    /abatim/i,
-  ]);
+  /** Captura o primeiro número BR logo após o rótulo. */
+  function pickAfter(re: RegExp, opts: { last?: boolean } = {}): number | null {
+    const flags = re.flags.includes("g") ? re.flags : re.flags + "g";
+    const full = new RegExp(re.source + String.raw`\s*(` + BR_NUM + `)`, flags);
+    const matches = [...norm.matchAll(full)];
+    if (matches.length === 0) return null;
+    const pick = opts.last ? matches[matches.length - 1] : matches[0];
+    return parseBR(pick[1]);
+  }
 
-  const cmv = captureNumberByLabel(lines, [
-    /\bcmv\b/i,
-    /custo\s+(da|de|dos|das).*(mercador|produto|vendid)/i,
-    /custo\s+das\s+mercadorias/i,
-  ]);
+  const total_vendas =
+    pickAfter(/total\s+vendas/i) ??
+    pickAfter(/receita\s+bruta/i) ??
+    pickAfter(/\bvendas?\s+(brutas?|totais?)\b/i) ??
+    pickAfter(/faturament\w*/i);
 
-  const resultado_bruto = captureNumberByLabel(lines, [
-    /lucro\s+bruto/i,
-    /resultado\s+bruto/i,
-    /margem\s+bruta/i,
-  ]);
+  const devolucoes =
+    pickAfter(/devolu[cç][oõ]es/i) ?? pickAfter(/abatim\w*/i);
 
-  const total_despesas = captureNumberByLabel(lines, [
-    /total\s+(de\s+)?despesas?/i,
-    /despesas\s+(totais|operacionais)/i,
-  ]);
+  const cmv =
+    pickAfter(/custo\s+das\s+mercadorias\s+vendidas\s*\(?\s*cmv\s*\)?/i) ??
+    pickAfter(/\(cmv\)/i) ??
+    pickAfter(/\bcmv\b/i) ??
+    pickAfter(/custo\s+(da|de|dos|das)\s+\w*\s*(mercador|produto|vendid)\w*/i);
 
-  const resultado_liquido = captureNumberByLabel(lines, [
-    /lucro\s+l[ií]quido/i,
-    /resultado\s+l[ií]quido/i,
-    /resultado\s+do\s+(exerc[ií]cio|per[ií]odo)/i,
-  ]);
+  // 'Resultado bruto' aparece 2x no VR System (no detalhamento e no resumo final).
+  // Ambas refletem o mesmo valor; usar a última garante o do resumo.
+  const resultado_bruto =
+    pickAfter(/resultado\s+bruto/i, { last: true }) ??
+    pickAfter(/lucro\s+bruto/i, { last: true }) ??
+    pickAfter(/margem\s+bruta/i, { last: true });
 
-  // Despesas detalhadas: procura linhas que tenham um valor e um rótulo "razoável" de despesa.
-  // Heurística: linhas entre o cabeçalho de "Despesas" e "Total Despesas/Resultado Líquido".
+  const total_despesas =
+    pickAfter(/total\s+de\s+despesas?/i, { last: true }) ??
+    pickAfter(/despesas\s+(totais|operacionais)/i, { last: true });
+
+  const resultado_liquido =
+    pickAfter(/resultado\s+l[ií]quido/i, { last: true }) ??
+    pickAfter(/lucro\s+l[ií]quido/i, { last: true }) ??
+    pickAfter(/resultado\s+do\s+(exerc[ií]cio|per[ií]odo)/i, { last: true });
+
+  // ---------------------------------------------------------------
+  // Despesas detalhadas
+  // ---------------------------------------------------------------
+  // Recorta região: após §PLANO§ (ou primeira menção a "Despesas <valor> <%>")
+  // até "Resultado bruto" (resumo final) ou "Total de despesas".
   const despesas: DreParsed["despesas"] = [];
-  let inDespesas = false;
-  const startRe = /(despesas|gastos)\s+(operacionais|administrat|gerais|com\s+vendas)/i;
-  const stopRe = /(total\s+(de\s+)?despesas|resultado\s+l[ií]quido|lucro\s+l[ií]quido)/i;
-  for (const ln of lines) {
-    if (!inDespesas && startRe.test(ln)) {
-      inDespesas = true;
-      continue;
-    }
-    if (inDespesas) {
-      if (stopRe.test(ln)) break;
-      const val = lastNumberInLine(ln);
-      if (val === null) continue;
-      // remove o valor para obter o rótulo
-      const label = ln.replace(NUM_RE, "").replace(/[-–—]+$/, "").trim();
-      if (label.length < 2) continue;
-      const valor = Math.abs(val);
-      if (valor === 0) continue;
+
+  let regionStart = norm.indexOf("§PLANO§");
+  if (regionStart === -1) {
+    const m = norm.match(/\bDespesas\s+[\d.]+,\d{2}\s+[\d.]+,\d{2}/i);
+    if (m && m.index !== undefined) regionStart = m.index;
+  }
+  if (regionStart !== -1) {
+    const rest = norm.slice(regionStart);
+    const stopMatch = rest.match(/(Resultado\s+bruto|Total\s+de\s+despesas|Resultado\s+l[ií]quido)\s+[\d.]+,\d{2}/i);
+    const region = stopMatch && stopMatch.index !== undefined ? rest.slice(0, stopMatch.index) : rest;
+
+    const SKIP = /^(despesas|total\s+de\s+despesas|resultado\s+bruto|resultado\s+l[ií]quido|lucro\s+l[ií]quido|plano\s+de\s+conta|valor|%\s*vnd|§plano§)$/i;
+    const tripleRe = /([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9\/\-\.&  ]{1,50}?)\s+([\d.]+,\d{2})\s+([\d.]+,\d{2})(?=\s|$)/g;
+    let mt: RegExpExecArray | null;
+    while ((mt = tripleRe.exec(region)) !== null) {
+      const label = mt[1].replace(/§plano§/gi, "").trim();
+      if (!label || SKIP.test(label)) continue;
+      const valor = parseBR(mt[2]);
+      if (valor === null || valor === 0) continue;
+      const pct = parseBR(mt[3]);
       despesas.push({
         categoria: categorize(label),
         subcategoria: label,
-        valor,
-        percentual_venda: total_vendas ? valor / total_vendas : null,
+        valor: Math.abs(valor),
+        percentual_venda: pct !== null ? pct / 100 : (total_vendas ? Math.abs(valor) / total_vendas : null),
       });
     }
   }
 
-  // Tenta extrair período (MM/AAAA ou nome do mês)
+  // ---------------------------------------------------------------
+  // Período: "De: 01/05/2026 até: 31/05/2026" ou "MM/AAAA"
+  // ---------------------------------------------------------------
   let periodo_inicio: string | null = null;
   let periodo_fim: string | null = null;
-  const periodoLine = findLineWith(lines, [
-    /per[ií]odo[:\s]/i,
-    /\b(jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)[a-zç]*\s*\/?\s*(de\s+)?20\d{2}/i,
-    /\b\d{2}\/20\d{2}\b/,
-  ]);
-  if (periodoLine) {
-    const m1 = periodoLine.match(/\b(\d{2})\/(\d{4})\b/);
+
+  const mDe = norm.match(/De:\s*(\d{2})\/(\d{2})\/(\d{4})\s*at[eé]:\s*(\d{2})\/(\d{2})\/(\d{4})/i);
+  if (mDe) {
+    periodo_inicio = `${mDe[3]}-${mDe[2]}-${mDe[1]}`;
+    periodo_fim = `${mDe[6]}-${mDe[5]}-${mDe[4]}`;
+  } else {
+    const m1 = norm.match(/\b(\d{2})\/(\d{4})\b/);
     if (m1) {
       const mes = parseInt(m1[1], 10);
       const ano = parseInt(m1[2], 10);
@@ -214,7 +250,10 @@ function parseDRE(text: string): DreParsed {
     }
   }
 
-  if (total_vendas === null) warnings.push("Total de vendas não detectado — preencha manualmente.");
+  if (total_vendas === null) {
+    warnings.push("Total de vendas não detectado — preencha manualmente.");
+    console.log("[parseDRE] sem total_vendas. Trecho inicial:", norm.slice(0, 1500));
+  }
   if (cmv === null) warnings.push("CMV não detectado — preencha manualmente.");
   if (despesas.length === 0) warnings.push("Nenhuma despesa detalhada detectada — adicione manualmente.");
 
@@ -230,9 +269,10 @@ function parseDRE(text: string): DreParsed {
     resultado_liquido,
     despesas,
     __warnings: warnings,
-    __raw_preview: lines.slice(0, 80).join("\n"),
+    __raw_preview: norm.slice(0, 3000) || lines.slice(0, 80).join("\n"),
   };
 }
+
 
 // =========================================================================
 // Parser de Estoque
