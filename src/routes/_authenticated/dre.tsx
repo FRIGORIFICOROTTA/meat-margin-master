@@ -24,6 +24,7 @@ function DrePage() {
   const [empresaId] = useEmpresaSelecionada();
   const [periodo] = usePeriodo();
   const [modo, setModo] = useState<"gerencial" | "fiscal">("gerencial");
+  const [fiscalSrc, setFiscalSrc] = useState<"estimado" | "real">("estimado");
   const [editing, setEditing] = useState(false);
   const qc = useQueryClient();
 
