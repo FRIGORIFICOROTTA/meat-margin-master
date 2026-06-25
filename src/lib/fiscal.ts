@@ -51,6 +51,8 @@ export type DREFiscal = {
   impostos_total: number;
   impostos_breakdown: Array<{ label: string; valor: number }>;
   receita_liquida: number;
+  cmv: number;
+  variacao_estoque: number;
   cmv_ajustado: number;
   lucro_bruto: number;
   despesas_operacionais: number;
@@ -59,6 +61,7 @@ export type DREFiscal = {
   csll: number;
   resultado_liquido_fiscal: number;
 };
+
 
 export function mergeConfig(
   regime: RegimeTributario,
@@ -102,10 +105,13 @@ export function calcularDREFiscal(
   }
 
   const receita_liquida = base - impostos_total;
-  // CMV do PDF já reflete o custo das mercadorias vendidas no período;
-  // a variação de estoque é mostrada separadamente como ajuste informativo,
-  // não somada novamente ao CMV (evita dupla contagem).
-  const cmv_ajustado = dre.cmv;
+  // CMV Ajustado = CMV do ERP + Variação de Estoque.
+  // Convenção do app: variacao_estoque = Estoque Inicial − Estoque Final
+  // (positiva quando estoque caiu → consumo extra → aumenta o custo real).
+  const cmv = dre.cmv;
+  const variacao_estoque = dre.variacao_estoque;
+  const cmv_ajustado = cmv + variacao_estoque;
+
   const lucro_bruto = receita_liquida - cmv_ajustado;
   const despesas_operacionais = dre.total_despesas;
   const lucro_antes_ir = lucro_bruto - despesas_operacionais;
@@ -131,6 +137,8 @@ export function calcularDREFiscal(
     impostos_total,
     impostos_breakdown,
     receita_liquida,
+    cmv,
+    variacao_estoque,
     cmv_ajustado,
     lucro_bruto,
     despesas_operacionais,
@@ -140,6 +148,7 @@ export function calcularDREFiscal(
     resultado_liquido_fiscal,
   };
 }
+
 
 // ---------------- DRE Fiscal REAL (com lançamentos efetivos) ----------------
 
@@ -240,7 +249,10 @@ export function calcularDREFiscalReal(
   }
 
   const receita_liquida = estimado.receita_bruta - estimado.devolucoes - impostos_oper_total;
-  const cmv_ajustado = dre.cmv;
+  const cmv = dre.cmv;
+  const variacao_estoque = dre.variacao_estoque;
+  const cmv_ajustado = cmv + variacao_estoque;
+
   const lucro_bruto = receita_liquida - cmv_ajustado;
   const despesas_operacionais = dre.total_despesas;
   const lucro_antes_ir = lucro_bruto - despesas_operacionais;
@@ -257,6 +269,8 @@ export function calcularDREFiscalReal(
     impostos_total: impostos_oper_total,
     impostos_breakdown,
     receita_liquida,
+    cmv,
+    variacao_estoque,
     cmv_ajustado,
     lucro_bruto,
     despesas_operacionais,
@@ -270,6 +284,7 @@ export function calcularDREFiscalReal(
     total_estimado_referencia: estimado.impostos_total + estimado.irpj + estimado.csll,
   };
 }
+
 
 export const TRIBUTO_LABEL = LABEL_TRIBUTO;
 
