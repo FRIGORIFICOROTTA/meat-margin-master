@@ -246,19 +246,23 @@ function DrePage() {
           <CardHeader>
             <CardTitle className="text-sm">Comparativo Gerencial × Fiscal</CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-2">
             <div className="grid grid-cols-3 gap-4 text-sm">
               <Comp label="Gerencial" valor={Number(dre.resultado_bruto) - Number(dre.variacao_estoque) - Number(dre.total_despesas)} />
               <Comp label="Fiscal" valor={fiscal.resultado_liquido_fiscal} />
               <Comp
-                label="Diferença"
+                label="Diferença (tributos)"
                 valor={fiscal.resultado_liquido_fiscal - (Number(dre.resultado_bruto) - Number(dre.variacao_estoque) - Number(dre.total_despesas))}
               />
-
             </div>
+            <p className="text-xs text-muted-foreground">
+              Ambas as visões usam a mesma base operacional (Receita − CMV − Variação de Estoque − Despesas).
+              A diferença corresponde exclusivamente aos tributos (PIS/COFINS/ICMS/ISS/DAS + IRPJ + CSLL).
+            </p>
           </CardContent>
         </Card>
       )}
+
 
 
 
