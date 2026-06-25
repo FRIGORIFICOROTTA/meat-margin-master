@@ -102,7 +102,10 @@ export function calcularDREFiscal(
   }
 
   const receita_liquida = base - impostos_total;
-  const cmv_ajustado = dre.cmv + dre.variacao_estoque;
+  // CMV do PDF já reflete o custo das mercadorias vendidas no período;
+  // a variação de estoque é mostrada separadamente como ajuste informativo,
+  // não somada novamente ao CMV (evita dupla contagem).
+  const cmv_ajustado = dre.cmv;
   const lucro_bruto = receita_liquida - cmv_ajustado;
   const despesas_operacionais = dre.total_despesas;
   const lucro_antes_ir = lucro_bruto - despesas_operacionais;

@@ -99,10 +99,10 @@ function Importar() {
   });
 
   const extractMut = useMutation({
-    mutationFn: async (arquivo_id: string) => {
+    mutationFn: async ({ arquivo_id, force }: { arquivo_id: string; force?: boolean }) => {
       const { data: sessionRes } = await supabase.auth.getSession();
       const res = await supabase.functions.invoke("extract-financial-data", {
-        body: { arquivo_id, idempotency_key: arquivo_id },
+        body: { arquivo_id, idempotency_key: arquivo_id, force: !!force },
         headers: sessionRes.session
           ? { Authorization: `Bearer ${sessionRes.session.access_token}` }
           : undefined,
@@ -134,8 +134,9 @@ function Importar() {
       const estoqueFinal = finData?.total_valor ?? 0;
       const variacao = estoqueInicial - estoqueFinal;
       const totalVendas = dreData.total_vendas ?? 0;
+      const devolucoes = dreData.devolucoes ?? 0;
       const cmv = dreData.cmv ?? 0;
-      const resultadoBruto = dreData.resultado_bruto ?? totalVendas - cmv;
+      const resultadoBruto = dreData.resultado_bruto ?? totalVendas - devolucoes - cmv;
       const totalDespesas = dreData.total_despesas ?? 0;
       const resultadoLiq = resultadoBruto - totalDespesas;
 
@@ -148,6 +149,7 @@ function Importar() {
             mes: periodo.mes,
             ano: periodo.ano,
             total_vendas: totalVendas,
+            devolucoes,
             cmv,
             resultado_bruto: resultadoBruto,
             total_despesas: totalDespesas,
@@ -281,18 +283,31 @@ function Importar() {
                       <div className="text-xs text-destructive">{arq.erro_mensagem}</div>
                     )}
                     {arq.status !== "confirmado" && (
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        onClick={() => extractMut.mutate(arq.id)}
-                        disabled={extractMut.isPending}
-                      >
-                        {arq.status === "extraido" ? (
-                          <><RefreshCw className="h-3 w-3 mr-1" />Re-extrair</>
-                        ) : (
-                          <><Upload className="h-3 w-3 mr-1" />Extrair com IA</>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => extractMut.mutate({ arquivo_id: arq.id })}
+                          disabled={extractMut.isPending}
+                        >
+                          {arq.status === "extraido" ? (
+                            <><RefreshCw className="h-3 w-3 mr-1" />Re-extrair</>
+                          ) : (
+                            <><Upload className="h-3 w-3 mr-1" />Extrair com IA</>
+                          )}
+                        </Button>
+                        {(arq.status === "erro" || arq.status === "extraido") && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => extractMut.mutate({ arquivo_id: arq.id, force: true })}
+                            disabled={extractMut.isPending}
+                            title="Ignora cache e reprocessa o PDF do zero"
+                          >
+                            <RefreshCw className="h-3 w-3 mr-1" />Forçar reprocessar
+                          </Button>
                         )}
-                      </Button>
+                      </div>
                     )}
                   </div>
                 )}
@@ -325,6 +340,7 @@ function Importar() {
 
 interface DreExtracted {
   total_vendas?: number;
+  devolucoes?: number;
   cmv?: number;
   resultado_bruto?: number;
   total_despesas?: number;
