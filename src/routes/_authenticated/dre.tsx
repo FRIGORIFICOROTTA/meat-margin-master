@@ -169,13 +169,21 @@ function DrePage() {
             {empresa?.nome} · {mesNome(periodo.mes)}/{periodo.ano} · {REGIME_LABEL[regime]}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <Tabs value={modo} onValueChange={(v) => setModo(v as any)}>
             <TabsList>
               <TabsTrigger value="gerencial">Gerencial</TabsTrigger>
               <TabsTrigger value="fiscal">Fiscal</TabsTrigger>
             </TabsList>
           </Tabs>
+          {modo === "fiscal" && (
+            <Tabs value={fiscalSrc} onValueChange={(v) => setFiscalSrc(v as any)}>
+              <TabsList>
+                <TabsTrigger value="estimado">Estimado</TabsTrigger>
+                <TabsTrigger value="real">Real</TabsTrigger>
+              </TabsList>
+            </Tabs>
+          )}
           <Button variant="default" size="sm" onClick={() => setEditing(true)}>
             <Pencil className="h-4 w-4 mr-1" /> Editar
           </Button>
@@ -188,6 +196,12 @@ function DrePage() {
         </div>
 
       </div>
+
+      {modo === "fiscal" && fiscalSrc === "real" && fiscalReal.faltando.length > 0 && (
+        <div className="rounded border border-amber-300 bg-amber-50 dark:bg-amber-950/20 p-3 text-sm">
+          <strong>{fiscalReal.faltando.length}</strong> tributo(s) sem lançamento real ({fiscalReal.faltando.join(", ").toUpperCase()}) — usando estimativa para esses. <a href="/fiscal" className="underline">Lançar agora</a>.
+        </div>
+      )}
 
       <Card>
         <CardHeader>
