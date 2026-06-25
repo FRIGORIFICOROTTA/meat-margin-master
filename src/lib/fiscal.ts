@@ -51,6 +51,8 @@ export type DREFiscal = {
   impostos_total: number;
   impostos_breakdown: Array<{ label: string; valor: number }>;
   receita_liquida: number;
+  cmv: number;
+  variacao_estoque: number;
   cmv_ajustado: number;
   lucro_bruto: number;
   despesas_operacionais: number;
@@ -59,6 +61,7 @@ export type DREFiscal = {
   csll: number;
   resultado_liquido_fiscal: number;
 };
+
 
 export function mergeConfig(
   regime: RegimeTributario,
