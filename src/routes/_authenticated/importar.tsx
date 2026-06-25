@@ -11,8 +11,9 @@ import { Label } from "@/components/ui/label";
 import { sha256Hex, mesNome } from "@/lib/finance";
 import { toast } from "sonner";
 import {
-  Upload, FileText, CheckCircle2, AlertCircle, Loader2, RefreshCw, ScanLine,
+  FileText, CheckCircle2, AlertCircle, Loader2, RefreshCw, ScanLine,
 } from "lucide-react";
+
 import type { Database } from "@/integrations/supabase/types";
 import { DreEditor, emptyDreValues, type DreFormValues } from "@/components/DreEditor";
 
