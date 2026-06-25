@@ -234,9 +234,7 @@ function DrePage() {
           </CardContent>
         </Card>
       )}
-    </div>
-  );
-}
+
 
 
       <EditDreDialog
