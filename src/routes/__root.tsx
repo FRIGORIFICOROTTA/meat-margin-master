@@ -81,14 +81,18 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Lovable App" },
-      { name: "description", content: "Lovable Generated Project" },
+      { title: "DRE-INTELIGENTE ROTA DAS CARNES" },
+      { name: "description", content: "Gerenciador de resultados." },
       { name: "author", content: "Lovable" },
-      { property: "og:title", content: "Lovable App" },
-      { property: "og:description", content: "Lovable Generated Project" },
+      { property: "og:title", content: "DRE-INTELIGENTE ROTA DAS CARNES" },
+      { property: "og:description", content: "Gerenciador de resultados." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
       { name: "twitter:site", content: "@Lovable" },
+      { name: "twitter:title", content: "DRE-INTELIGENTE ROTA DAS CARNES" },
+      { name: "twitter:description", content: "Gerenciador de resultados." },
+      { property: "og:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/02ae5d33-10c1-4ea6-8add-7a1dfc71a696/id-preview-360fbe83--64a34eb3-b482-4b34-8b7c-b6909cf80922.lovable.app-1782390595527.png" },
+      { name: "twitter:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/02ae5d33-10c1-4ea6-8add-7a1dfc71a696/id-preview-360fbe83--64a34eb3-b482-4b34-8b7c-b6909cf80922.lovable.app-1782390595527.png" },
     ],
     links: [
       {
