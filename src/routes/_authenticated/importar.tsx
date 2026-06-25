@@ -524,8 +524,8 @@ function Importar() {
                     <div className="flex flex-wrap gap-2 pt-2 border-t">
                       <MovePeriodoButton
                         arquivoId={arq.id}
-                        mesAtual={arq.mes}
-                        anoAtual={arq.ano}
+                        mesAtual={arq.mes ?? periodo.mes}
+                        anoAtual={arq.ano ?? periodo.ano}
                         onMove={(mes, ano) => moveMut.mutate({ arquivo_id: arq.id, mes, ano })}
                         disabled={moveMut.isPending}
                       />
