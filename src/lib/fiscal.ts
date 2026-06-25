@@ -105,11 +105,13 @@ export function calcularDREFiscal(
   }
 
   const receita_liquida = base - impostos_total;
-  // CMV Ajustado = CMV do ERP - Variação de Estoque (Estoque Final - Estoque Inicial).
-  // Variação negativa (estoque caiu) aumenta o custo real do período.
+  // CMV Ajustado = CMV do ERP + Variação de Estoque.
+  // Convenção do app: variacao_estoque = Estoque Inicial − Estoque Final
+  // (positiva quando estoque caiu → consumo extra → aumenta o custo real).
   const cmv = dre.cmv;
   const variacao_estoque = dre.variacao_estoque;
-  const cmv_ajustado = cmv - variacao_estoque;
+  const cmv_ajustado = cmv + variacao_estoque;
+
   const lucro_bruto = receita_liquida - cmv_ajustado;
   const despesas_operacionais = dre.total_despesas;
   const lucro_antes_ir = lucro_bruto - despesas_operacionais;
