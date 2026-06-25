@@ -9,7 +9,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { fmtBRL, fmtPct, mesNome } from "@/lib/finance";
 import { cn } from "@/lib/utils";
-import { calcularDREFiscal, REGIME_LABEL, type RegimeTributario, type ConfigTributaria } from "@/lib/fiscal";
+import { calcularDREFiscal, calcularDREFiscalReal, REGIME_LABEL, type RegimeTributario, type ConfigTributaria } from "@/lib/fiscal";
 import { exportDREPdf, exportDREExcel, type LinhaExport } from "@/lib/export-utils";
 import { FileDown, FileSpreadsheet, Pencil } from "lucide-react";
 import { DreEditor, type DreFormValues, emptyDreValues } from "@/components/DreEditor";
