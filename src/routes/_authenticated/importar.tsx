@@ -158,7 +158,6 @@ function Importar() {
     },
     onSuccess: () => {
       qc.invalidateQueries();
-      setFormInit(false);
       toast.success("Estoque inicial pré-lançado a partir do mês anterior.");
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : "Erro ao pré-lançar"),
