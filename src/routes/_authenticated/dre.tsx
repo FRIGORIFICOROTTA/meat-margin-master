@@ -51,7 +51,14 @@ function DrePage() {
         .from("despesas_detalhe")
         .select("*")
         .eq("dre_id", dre.id);
-      return { empresa, dre, despesas: despesas ?? [] };
+      const { data: lancamentos } = await supabase
+        .from("lancamentos_fiscais")
+        .select("tipo, label, valor_real, sinal")
+        .eq("empresa_id", empresaId!)
+        .eq("mes", periodo.mes)
+        .eq("ano", periodo.ano)
+        .is("deleted_at", null);
+      return { empresa, dre, despesas: despesas ?? [], lancamentos: lancamentos ?? [] };
     },
   });
 
