@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { sha256Hex, mesNome } from "@/lib/finance";
 import { toast } from "sonner";
 import {
-  FileText, CheckCircle2, AlertCircle, Loader2, RefreshCw, ScanLine, CalendarClock, Trash2,
+  FileText, CheckCircle2, AlertCircle, Loader2, RefreshCw, ScanLine, CalendarClock, Trash2, ArrowRightCircle,
 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
