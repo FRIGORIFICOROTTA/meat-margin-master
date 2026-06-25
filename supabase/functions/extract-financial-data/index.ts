@@ -257,8 +257,13 @@ interface EstoqueParsed {
 }
 
 function parseEstoque(text: string): EstoqueParsed {
-  // Normaliza espaços
-  const flat = text.replace(/\u00A0/g, " ").replace(/[ \t]+/g, " ");
+  // Normaliza espaços (inclui NBSP e tabs)
+  let flat = text
+    .replace(/\u00A0/g, " ")
+    .replace(/\r/g, " ")
+    .replace(/\n/g, " ")
+    .replace(/\t/g, " ")
+    .replace(/[ ]+/g, " ");
 
   // CNPJ e data de referência (operam no texto bruto, não dependem de \n)
   let cnpj: string | null = null;
@@ -271,14 +276,35 @@ function parseEstoque(text: string): EstoqueParsed {
     flat.match(/\b(\d{2})\/(\d{2})\/(\d{4})\b/);
   if (dataM) data_referencia = `${dataM[3]}-${dataM[2]}-${dataM[1]}`;
 
-  // Regex de item embutida no texto contínuo:
-  //   código (1-8 dígitos) + descrição (não-greedy) + unidade + qtd + vu + vt (números BR)
-  // Unidades ordenadas do mais longo para o mais curto p/ evitar UN casar antes de UNID.
+  // Total reportado no PDF (antes de remover cabeçalhos)
+  let totalReportado: number | null = null;
+  const totalRe =
+    /(?:total\s+(?:geral|do\s+invent[aá]rio|do\s+estoque)|valor\s+total(?:\s+do\s+estoque)?)\s*[:R$\s]*?(\d{1,3}(?:\.\d{3})*(?:,\d+)?)/i;
+  const tM = flat.match(totalRe);
+  if (tM) totalReportado = parseBR(tM[1]);
+
+  // Remove cabeçalhos/rodapés repetidos (substitui por espaço para não colar tokens)
+  const noise: RegExp[] = [
+    /p[aá]gina\s+\d+\s+de\s+\d+/gi,
+    /c[oó]digo\s+(?:do\s+)?produto\s+(?:descri[cç][aã]o\s+)?unid(?:ade)?\s+qtde?\s+v\.?\s*unit\.?\s+v\.?\s*total/gi,
+    /c[oó]digo\s+descri[cç][aã]o\s+unid(?:ade)?\s+qtde?\s+v(?:alor)?\.?\s*unit\.?\s+v(?:alor)?\.?\s*total/gi,
+    /livro\s+de\s+registro\s+de\s+invent[aá]rio/gi,
+    /estoque\s+existente\s+em[:\s]+\d{2}\/\d{2}\/\d{4}/gi,
+    /relat[oó]rio\s+de\s+estoque/gi,
+    /emitido\s+em[:\s]+\d{2}\/\d{2}\/\d{4}(?:\s+\d{2}:\d{2}(?::\d{2})?)?/gi,
+    /\bfls?\.\s*\d+\b/gi,
+  ];
+  for (const rx of noise) flat = flat.replace(rx, " ");
+  flat = flat.replace(/[ ]+/g, " ").trim();
+
+  // Parsing em duas etapas: ancorar em "UNIDADE seguida de 3 números BR"
+  // e então capturar código + descrição olhando para trás.
   const UNI = "UNID|KG|PCT|PC|CX|LT|MT|DZ|GR|ML|UN|G|L";
-  const num = "\\d{1,3}(?:\\.\\d{3})*(?:,\\d+)?|\\d+(?:[.,]\\d+)?";
-  const itemRe = new RegExp(
-    `\\b(\\d{1,8})\\s+([A-Za-zÀ-ÿ0-9ºª°./\\-\\(\\)\\s]+?)\\s+(${UNI})\\s+(${num})\\s+(${num})\\s+(${num})(?=\\s|$)`,
-    "g",
+  const numSrc = "\\d{1,3}(?:\\.\\d{3})*(?:,\\d+)?|\\d+(?:[.,]\\d+)?";
+  // \b antes da unidade evita casar com sufixos de palavra (ex.: "...KG" em "1KG")
+  const anchorRe = new RegExp(
+    `\\b(${UNI})\\b\\s+(${numSrc})\\s+(${numSrc})\\s+(${numSrc})(?=\\s|$|[A-Za-zÀ-ÿ])`,
+    "gi",
   );
 
   const warnings: string[] = [];
@@ -286,20 +312,45 @@ function parseEstoque(text: string): EstoqueParsed {
   const seen = new Set<string>();
   let totalValor = 0;
 
-  for (const m of flat.matchAll(itemRe)) {
-    const codigo = m[1];
-    let produto = m[2].replace(/\s+/g, " ").trim();
-    const unidade = m[3].toUpperCase();
-    const qtd = parseBR(m[4]);
-    const vu = parseBR(m[5]);
-    const vt = parseBR(m[6]);
-    if (qtd === null || vu === null || vt === null) continue;
-    if (vt <= 0) continue;
-    // descarta lixo curto / cabeçalhos
+  let lastEnd = 0;
+  for (const m of flat.matchAll(anchorRe)) {
+    const unidade = m[1].toUpperCase();
+    const qtd = parseBR(m[2]);
+    const vu = parseBR(m[3]);
+    const vt = parseBR(m[4]);
+    const matchStart = m.index ?? 0;
+    if (qtd === null || vu === null || vt === null || vt <= 0) {
+      lastEnd = matchStart + m[0].length;
+      continue;
+    }
+
+    // Janela entre o fim do match anterior e o início deste = "código + descrição"
+    const window = flat.slice(lastEnd, matchStart).trim();
+    lastEnd = matchStart + m[0].length;
+    if (!window) continue;
+
+    // Código: primeira sequência de 1-8 dígitos isolada (espaço antes/depois)
+    const codeM = window.match(/(?:^|\s)(\d{1,8})\s+([^\d].*)$/s);
+    let codigo: string | null = null;
+    let produto = "";
+    if (codeM) {
+      codigo = codeM[1];
+      produto = codeM[2];
+    } else {
+      // fallback: tenta achar qualquer dígito inicial
+      const fb = window.match(/(\d{1,8})\s+(.+)$/s);
+      if (fb) {
+        codigo = fb[1];
+        produto = fb[2];
+      } else {
+        produto = window;
+      }
+    }
+    produto = produto.replace(/\s+/g, " ").trim();
     if (produto.length < 2) continue;
     if (/^p[aá]gina$/i.test(produto)) continue;
-    // deduplica (mesmo código + valor_total) — cabeçalhos repetidos entre páginas
-    const key = `${codigo}|${vt.toFixed(2)}|${qtd}`;
+
+    const key = `${codigo ?? "?"}|${vt.toFixed(2)}|${qtd}`;
     if (seen.has(key)) continue;
     seen.add(key);
 
@@ -314,15 +365,14 @@ function parseEstoque(text: string): EstoqueParsed {
     totalValor += vt;
   }
 
-  // Total reportado no PDF (se houver)
-  let totalReportado: number | null = null;
-  const totalRe =
-    /(?:total\s+(?:geral|do\s+invent[aá]rio|do\s+estoque)|valor\s+total(?:\s+do\s+estoque)?)\s*[:R$\s]*?(\d{1,3}(?:\.\d{3})*(?:,\d+)?)/i;
-  const tM = flat.match(totalRe);
-  if (tM) totalReportado = parseBR(tM[1]);
-
-  if (itens.length === 0)
+  if (itens.length === 0) {
     warnings.push("Nenhum item detectado automaticamente — adicione manualmente.");
+    // Diagnóstico: mostra início e fim do texto normalizado
+    console.log("[parseEstoque] zero itens — primeiros 3000 chars do flat:");
+    console.log(flat.slice(0, 3000));
+    console.log("[parseEstoque] últimos 1500 chars:");
+    console.log(flat.slice(-1500));
+  }
   if (!data_referencia)
     warnings.push("Data de referência não detectada — preencha manualmente.");
 
@@ -334,9 +384,10 @@ function parseEstoque(text: string): EstoqueParsed {
     total_valor: totalReportado ?? (totalValor > 0 ? totalValor : null),
     itens,
     __warnings: warnings,
-    __raw_preview: flat.slice(0, 2000),
+    __raw_preview: flat.slice(0, 3000),
   };
 }
+
 
 // =========================================================================
 // Handler
