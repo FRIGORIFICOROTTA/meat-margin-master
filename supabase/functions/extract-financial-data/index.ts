@@ -76,29 +76,12 @@ function captureNumberByLabel(lines: string[], patterns: RegExp[]): number | nul
   return lastNumberInLine(ln);
 }
 
-/** Captura primeiro número BR de uma linha (coluna "Valor", que vem antes de uma eventual coluna de %). */
-function firstNumberInLine(line: string): number | null {
-  const matches = line.match(NUM_RE);
-  if (!matches) return null;
-  for (const m of matches) {
-    const v = parseBR(m);
-    if (v !== null) return v;
-  }
-  return null;
-}
-
-function captureFirstNumberByLabel(lines: string[], patterns: RegExp[]): number | null {
-  const ln = findLineWith(lines, patterns);
-  if (!ln) return null;
-  return firstNumberInLine(ln);
-}
-
 // =========================================================================
 // Categorização de despesas
 // =========================================================================
 
 const CATEGORIAS: Array<{ cat: string; re: RegExp }> = [
-  { cat: "Folha de Pagamento", re: /(sal[aá]rio|folha|f[ée]rias|13[ºo°]|inss|fgts|encargos|vale[- ]?transporte|vt|vale[- ]?refei|vr|rescis|vale\s*funcion|gratifica)/i },
+  { cat: "Folha de Pagamento", re: /(sal[aá]rio|folha|f[ée]rias|13[ºo°]|inss|fgts|encargos|vale[- ]?transporte|vt|vale[- ]?refei|vr|rescis)/i },
   { cat: "Pró-labore", re: /(pr[oó][- ]?labore)/i },
   { cat: "Aluguel", re: /(aluguel|loca[cç][aã]o|condom[ií]nio)/i },
   { cat: "Energia", re: /(energia|el[eé]trica|luz|cemig|enel|coelba|equatorial)/i },
@@ -140,43 +123,6 @@ interface DreParsed {
   __raw_preview: string;
 }
 
-/**
- * Relatórios de DRE costumam exibir uma árvore de despesas (total > categoria > subcategoria),
- * onde cada nível soma exatamente o valor do nível acima. Para não contar a mesma despesa
- * mais de uma vez, "desempacotamos" a árvore mantendo apenas as folhas (itens que não são
- * a soma de linhas subsequentes).
- */
-function collapseDespesaTree(rows: Array<{ label: string; valor: number }>): Array<{ label: string; valor: number }> {
-  const EPS = 0.02;
-
-  function parseNode(i: number, hi: number): [Array<{ label: string; valor: number }>, number] {
-    const self = rows[i];
-    let j = i + 1;
-    let sum = 0;
-    const leaves: Array<{ label: string; valor: number }> = [];
-    while (j < hi && sum < self.valor - EPS) {
-      const [childLeaves, nextJ] = parseNode(j, hi);
-      const childSum = childLeaves.reduce((acc, r) => acc + r.valor, 0);
-      leaves.push(...childLeaves);
-      sum += childSum;
-      j = nextJ;
-    }
-    if (Math.abs(sum - self.valor) < EPS && leaves.length > 0) {
-      return [leaves, j];
-    }
-    return [[self], i + 1];
-  }
-
-  const result: Array<{ label: string; valor: number }> = [];
-  let i = 0;
-  while (i < rows.length) {
-    const [leaves, next] = parseNode(i, rows.length);
-    result.push(...leaves);
-    i = next;
-  }
-  return result;
-}
-
 function parseDRE(text: string): DreParsed {
   const lines = text
     .split(/\r?\n/)
@@ -185,57 +131,47 @@ function parseDRE(text: string): DreParsed {
 
   const warnings: string[] = [];
 
-  let filial: string | null = null;
-  const filialLine = findLineWith(lines, [/filial[:\s]/i]);
-  if (filialLine) {
-    const fm = filialLine.match(/filial[:\s]+(.+?)(?:\s+De:|\s+at[ée]:|\s+Tipo\s+data|$)/i);
-    if (fm) filial = fm[1].trim();
-  }
-
-  // Colunas no formato "Rótulo  Valor  % Vnd": o valor sempre vem antes do percentual,
-  // então usamos o PRIMEIRO número da linha, nunca o último.
-  const total_vendas = captureFirstNumberByLabel(lines, [
+  const total_vendas = captureNumberByLabel(lines, [
     /receita\s+bruta/i,
     /total\s+(de\s+)?vendas/i,
     /\bvendas?\s+(brutas?|totais?)\b/i,
     /faturament/i,
   ]);
 
-  const devolucoes = captureFirstNumberByLabel(lines, [
+  const devolucoes = captureNumberByLabel(lines, [
     /devolu[cç][oõ]es/i,
     /abatim/i,
   ]);
 
-  const cmv = captureFirstNumberByLabel(lines, [
+  const cmv = captureNumberByLabel(lines, [
     /\bcmv\b/i,
     /custo\s+(da|de|dos|das).*(mercador|produto|vendid)/i,
     /custo\s+das\s+mercadorias/i,
   ]);
 
-  const resultado_bruto = captureFirstNumberByLabel(lines, [
+  const resultado_bruto = captureNumberByLabel(lines, [
     /lucro\s+bruto/i,
     /resultado\s+bruto/i,
     /margem\s+bruta/i,
   ]);
 
-  const total_despesas = captureFirstNumberByLabel(lines, [
+  const total_despesas = captureNumberByLabel(lines, [
     /total\s+(de\s+)?despesas?/i,
     /despesas\s+(totais|operacionais)/i,
   ]);
 
-  const resultado_liquido = captureFirstNumberByLabel(lines, [
+  const resultado_liquido = captureNumberByLabel(lines, [
     /lucro\s+l[ií]quido/i,
     /resultado\s+l[ií]quido/i,
     /resultado\s+do\s+(exerc[ií]cio|per[ií]odo)/i,
   ]);
 
-  // Despesas detalhadas: linhas entre o cabeçalho da tabela de despesas e o resumo final.
-  // Aceita tanto "Despesas Operacionais/Administrativas" (outros layouts) quanto
-  // "Plano de conta" (layout vrsystem.info, que lista apenas "Despesas" sem qualificador).
-  const rawRows: Array<{ label: string; valor: number }> = [];
+  // Despesas detalhadas: procura linhas que tenham um valor e um rótulo "razoável" de despesa.
+  // Heurística: linhas entre o cabeçalho de "Despesas" e "Total Despesas/Resultado Líquido".
+  const despesas: DreParsed["despesas"] = [];
   let inDespesas = false;
-  const startRe = /(despesas|gastos)\s+(operacionais|administrat|gerais|com\s+vendas)|plano\s+de\s+conta/i;
-  const stopRe = /(total\s+(de\s+)?despesas|resultado\s+l[ií]quido|lucro\s+l[ií]quido|resultado\s+bruto)/i;
+  const startRe = /(despesas|gastos)\s+(operacionais|administrat|gerais|com\s+vendas)/i;
+  const stopRe = /(total\s+(de\s+)?despesas|resultado\s+l[ií]quido|lucro\s+l[ií]quido)/i;
   for (const ln of lines) {
     if (!inDespesas && startRe.test(ln)) {
       inDespesas = true;
@@ -243,24 +179,21 @@ function parseDRE(text: string): DreParsed {
     }
     if (inDespesas) {
       if (stopRe.test(ln)) break;
-      if (/p[aá]gina\s+\d+\s+de\s+\d+/i.test(ln) || /vrsystem\.info|https?:\/\//i.test(ln)) continue;
-      const val = firstNumberInLine(ln);
+      const val = lastNumberInLine(ln);
       if (val === null) continue;
+      // remove o valor para obter o rótulo
       const label = ln.replace(NUM_RE, "").replace(/[-–—]+$/, "").trim();
       if (label.length < 2) continue;
       const valor = Math.abs(val);
       if (valor === 0) continue;
-      rawRows.push({ label, valor });
+      despesas.push({
+        categoria: categorize(label),
+        subcategoria: label,
+        valor,
+        percentual_venda: total_vendas ? valor / total_vendas : null,
+      });
     }
   }
-
-  const leaves = collapseDespesaTree(rawRows);
-  const despesas: DreParsed["despesas"] = leaves.map(({ label, valor }) => ({
-    categoria: categorize(label),
-    subcategoria: label,
-    valor,
-    percentual_venda: total_vendas ? valor / total_vendas : null,
-  }));
 
   // Tenta extrair período (MM/AAAA ou nome do mês)
   let periodo_inicio: string | null = null;
@@ -286,7 +219,7 @@ function parseDRE(text: string): DreParsed {
   if (despesas.length === 0) warnings.push("Nenhuma despesa detalhada detectada — adicione manualmente.");
 
   return {
-    filial,
+    filial: null,
     periodo_inicio,
     periodo_fim,
     total_vendas,
@@ -332,10 +265,6 @@ function parseEstoque(text: string): EstoqueParsed {
     .replace(/\t/g, " ")
     .replace(/[ ]+/g, " ");
 
-  let filial: string | null = null;
-  const empresaM = flat.match(/Empresa:\s*([^\n]+?)\s+(?:IE:|CNPJ:)/i);
-  if (empresaM) filial = empresaM[1].trim();
-
   // CNPJ e data de referência (operam no texto bruto, não dependem de \n)
   let cnpj: string | null = null;
   const cnpjM = flat.match(/\b(\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2})\b/);
@@ -347,21 +276,13 @@ function parseEstoque(text: string): EstoqueParsed {
     flat.match(/\b(\d{2})\/(\d{2})\/(\d{4})\b/);
   if (dataM) data_referencia = `${dataM[3]}-${dataM[2]}-${dataM[1]}`;
 
-  // Total reportado no PDF (antes de remover cabeçalhos): a linha "Total geral: <qtd> <valor>"
-  // tem DUAS colunas (quantidade e valor) — o valor é sempre o ÚLTIMO número da linha,
-  // nunca o primeiro. Pegamos a ÚLTIMA ocorrência de "total geral" no texto (a do resumo
-  // final, que normalmente vem sozinha) e, dela, o último número.
+  // Total reportado no PDF: pega o ÚLTIMO match (rodapé "Total Geral"),
+  // não o primeiro (que pode ser um "valor total" intermediário/de página).
   let totalReportado: number | null = null;
-  const totalMatches = [...flat.matchAll(/total\s+geral\s*:?\s*((?:[\d.,]+\s*)+)/gi)];
-  if (totalMatches.length > 0) {
-    const ultimaOcorrencia = totalMatches[totalMatches.length - 1];
-    const numeros = ultimaOcorrencia[1]
-      .trim()
-      .split(/\s+/)
-      .map(parseBR)
-      .filter((n): n is number => n !== null);
-    if (numeros.length > 0) totalReportado = numeros[numeros.length - 1];
-  }
+  const totalRe =
+    /(?:total\s+(?:geral|do\s+invent[aá]rio|do\s+estoque)|valor\s+total(?:\s+do\s+estoque)?)\s*[:R$\s]*?(\d{1,3}(?:\.\d{3})*(?:,\d+)?)/gi;
+  const tMatches = [...flat.matchAll(totalRe)];
+  if (tMatches.length) totalReportado = parseBR(tMatches[tMatches.length - 1][1]);
 
   // Remove cabeçalhos/rodapés repetidos (substitui por espaço para não colar tokens)
   const noise: RegExp[] = [
@@ -373,6 +294,14 @@ function parseEstoque(text: string): EstoqueParsed {
     /relat[oó]rio\s+de\s+estoque/gi,
     /emitido\s+em[:\s]+\d{2}\/\d{2}\/\d{4}(?:\s+\d{2}:\d{2}(?::\d{2})?)?/gi,
     /\bfls?\.\s*\d+\b/gi,
+    // Data por extenso (com ou sem hora): "30 de abril de 2026 22:02:44"
+    /\b\d{1,2}\s+de\s+(?:janeiro|fevereiro|mar[cç]o|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)\s+de\s+\d{4}(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?/gi,
+    // Cabeçalho fiscal repetido entre páginas
+    /\bempresa\s*:\s*[^:]*?(?=\s+(?:ie|cnpj|livro|folha)\s*:)/gi,
+    /\bie\s*:\s*[\d.\-/]+/gi,
+    /\bcnpj\s*:\s*\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}/gi,
+    /\blivro\s*:\s*\d+/gi,
+    /\bfolha\s*:\s*\d+/gi,
   ];
   for (const rx of noise) flat = flat.replace(rx, " ");
   flat = flat.replace(/[ ]+/g, " ").trim();
@@ -409,22 +338,29 @@ function parseEstoque(text: string): EstoqueParsed {
     lastEnd = matchStart + m[0].length;
     if (!window) continue;
 
-    // Código: primeira sequência de 1-8 dígitos isolada (espaço antes/depois)
-    const codeM = window.match(/(?:^|\s)(\d{1,8})\s+([^\d].*)$/s);
+    // Código + descrição: pega o ÚLTIMO "dígito + letra" da janela.
+    // Descarta lixo residual de cabeçalho que tenha sobrado antes do item real.
     let codigo: string | null = null;
     let produto = "";
-    if (codeM) {
-      codigo = codeM[1];
-      produto = codeM[2];
-    } else {
-      // fallback: tenta achar qualquer dígito inicial
-      const fb = window.match(/(\d{1,8})\s+(.+)$/s);
-      if (fb) {
-        codigo = fb[1];
-        produto = fb[2];
+    const starts: number[] = [];
+    const startRe = /(?:^|\s)(\d{1,8})\s+(?=[A-Za-zÀ-ÿ])/g;
+    for (const c of window.matchAll(startRe)) {
+      // posição do dígito (após o espaço inicial, se houver)
+      const idx = (c.index ?? 0) + c[0].indexOf(c[1]);
+      starts.push(idx);
+    }
+    if (starts.length) {
+      const lastStart = starts[starts.length - 1];
+      const tail = window.slice(lastStart);
+      const m = tail.match(/^(\d{1,8})\s+(.+)$/s);
+      if (m) {
+        codigo = m[1];
+        produto = m[2];
       } else {
-        produto = window;
+        produto = tail;
       }
+    } else {
+      produto = window;
     }
     produto = produto.replace(/\s+/g, " ").trim();
     if (produto.length < 2) continue;
@@ -456,19 +392,8 @@ function parseEstoque(text: string): EstoqueParsed {
   if (!data_referencia)
     warnings.push("Data de referência não detectada — preencha manualmente.");
 
-  // Confere a contagem declarada no PDF ("Itens: 313") contra o que extraímos.
-  const itensDeclaradosM = flat.match(/\bitens\s*:?\s*(\d+)/i);
-  if (itensDeclaradosM) {
-    const declarado = parseInt(itensDeclaradosM[1], 10);
-    if (declarado !== itens.length) {
-      warnings.push(
-        `Itens extraídos (${itens.length}) difere do total declarado no PDF (${declarado}) — revise manualmente.`,
-      );
-    }
-  }
-
   return {
-    filial,
+    filial: null,
     cnpj,
     data_referencia,
     total_itens: itens.length || null,
