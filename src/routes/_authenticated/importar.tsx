@@ -521,6 +521,20 @@ function Importar() {
                         )}
                       </div>
                     )}
+                    <div className="flex flex-wrap gap-2 pt-2 border-t">
+                      <MovePeriodoButton
+                        arquivoId={arq.id}
+                        mesAtual={arq.mes}
+                        anoAtual={arq.ano}
+                        onMove={(mes, ano) => moveMut.mutate({ arquivo_id: arq.id, mes, ano })}
+                        disabled={moveMut.isPending}
+                      />
+                      <DeleteButton
+                        hasLinks={!!arq.dre_id || !!arq.snapshot_id}
+                        onDelete={(cascade) => deleteMut.mutate({ arquivo_id: arq.id, cascade })}
+                        disabled={deleteMut.isPending}
+                      />
+                    </div>
                   </div>
                 )}
               </CardContent>
