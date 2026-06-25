@@ -378,26 +378,41 @@ function parseEstoque(text: string): EstoqueParsed {
     lastEnd = matchStart + m[0].length;
     if (!window) continue;
 
-    // Código + descrição: pega o ÚLTIMO "dígito + letra" da janela.
-    // Descarta lixo residual de cabeçalho que tenha sobrado antes do item real.
+    // Código + descrição: prefere o PRIMEIRO "dígito + letra" cuja descrição
+    // tenha ≥ 4 caracteres e NÃO seja apenas um token de unidade
+    // (evita capturar "300 GR" / "500 ML" no meio da descrição do item anterior).
+    // Fallback para o último start, caso nenhum candidato válido seja encontrado.
     let codigo: string | null = null;
     let produto = "";
     const starts: number[] = [];
     const startRe = /(?:^|\s)(\d{1,8})\s+(?=[A-Za-zÀ-ÿ])/g;
     for (const c of window.matchAll(startRe)) {
-      // posição do dígito (após o espaço inicial, se houver)
       const idx = (c.index ?? 0) + c[0].indexOf(c[1]);
       starts.push(idx);
     }
+    const UNIT_ONLY = /^(?:UNID|UN|KG|PCT|PC|CX|LT|MT|DZ|GR|ML|G|L)\b/i;
     if (starts.length) {
-      const lastStart = starts[starts.length - 1];
-      const tail = window.slice(lastStart);
-      const m = tail.match(/^(\d{1,8})\s+(.+)$/s);
-      if (m) {
-        codigo = m[1];
-        produto = m[2];
+      let picked: { c: string; p: string } | null = null;
+      for (const s of starts) {
+        const tail = window.slice(s);
+        const mm = tail.match(/^(\d{1,8})\s+(.+)$/s);
+        if (!mm) continue;
+        const p = mm[2].replace(/\s+/g, " ").trim();
+        if (p.length >= 4 && !UNIT_ONLY.test(p)) {
+          picked = { c: mm[1], p };
+          break;
+        }
+      }
+      if (!picked) {
+        const tail = window.slice(starts[starts.length - 1]);
+        const mm = tail.match(/^(\d{1,8})\s+(.+)$/s);
+        if (mm) picked = { c: mm[1], p: mm[2] };
+      }
+      if (picked) {
+        codigo = picked.c;
+        produto = picked.p;
       } else {
-        produto = tail;
+        produto = window;
       }
     } else {
       produto = window;
@@ -406,7 +421,8 @@ function parseEstoque(text: string): EstoqueParsed {
     if (produto.length < 2) continue;
     if (/^p[aá]gina$/i.test(produto)) continue;
 
-    const key = `${codigo ?? "?"}|${vt.toFixed(2)}|${qtd}`;
+    // Dedup inclui produto: SKUs distintos com mesmo (qtd, vt) não colidem.
+    const key = `${codigo ?? "?"}|${produto.slice(0, 40).toLowerCase()}|${vt.toFixed(2)}|${qtd}`;
     if (seen.has(key)) continue;
     seen.add(key);
 
