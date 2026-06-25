@@ -134,8 +134,9 @@ function Importar() {
       const estoqueFinal = finData?.total_valor ?? 0;
       const variacao = estoqueInicial - estoqueFinal;
       const totalVendas = dreData.total_vendas ?? 0;
+      const devolucoes = dreData.devolucoes ?? 0;
       const cmv = dreData.cmv ?? 0;
-      const resultadoBruto = dreData.resultado_bruto ?? totalVendas - cmv;
+      const resultadoBruto = dreData.resultado_bruto ?? totalVendas - devolucoes - cmv;
       const totalDespesas = dreData.total_despesas ?? 0;
       const resultadoLiq = resultadoBruto - totalDespesas;
 
@@ -148,6 +149,7 @@ function Importar() {
             mes: periodo.mes,
             ano: periodo.ano,
             total_vendas: totalVendas,
+            devolucoes,
             cmv,
             resultado_bruto: resultadoBruto,
             total_despesas: totalDespesas,
@@ -338,6 +340,7 @@ function Importar() {
 
 interface DreExtracted {
   total_vendas?: number;
+  devolucoes?: number;
   cmv?: number;
   resultado_bruto?: number;
   total_despesas?: number;
