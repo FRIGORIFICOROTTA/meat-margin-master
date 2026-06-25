@@ -11,8 +11,14 @@ import { Label } from "@/components/ui/label";
 import { sha256Hex, mesNome } from "@/lib/finance";
 import { toast } from "sonner";
 import {
-  FileText, CheckCircle2, AlertCircle, Loader2, RefreshCw, ScanLine,
+  FileText, CheckCircle2, AlertCircle, Loader2, RefreshCw, ScanLine, CalendarClock, Trash2,
 } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 import type { Database } from "@/integrations/supabase/types";
 import { DreEditor, emptyDreValues, type DreFormValues } from "@/components/DreEditor";
@@ -221,6 +227,115 @@ function Importar() {
     onError: (e) => toast.error(e instanceof Error ? e.message : "Erro na extração"),
   });
 
+  const moveMut = useMutation({
+    mutationFn: async ({ arquivo_id, mes, ano }: { arquivo_id: string; mes: number; ano: number }) => {
+      if (!empresaId) throw new Error("Empresa não selecionada");
+      const { data: arq, error: arqErr } = await supabase
+        .from("arquivos_importados")
+        .select("*")
+        .eq("id", arquivo_id)
+        .single();
+      if (arqErr) throw arqErr;
+      if (arq.mes === mes && arq.ano === ano) {
+        throw new Error("Já está nesse período");
+      }
+      // Se houver DRE vinculada, valida conflito no destino
+      if (arq.dre_id) {
+        const { data: conflito } = await supabase
+          .from("dre_mensal")
+          .select("id")
+          .eq("empresa_id", empresaId)
+          .eq("mes", mes)
+          .eq("ano", ano)
+          .is("deleted_at", null)
+          .neq("id", arq.dre_id)
+          .maybeSingle();
+        if (conflito) {
+          throw new Error("Já existe DRE no período de destino. Exclua-a antes de mover.");
+        }
+        const { error: dreErr } = await supabase
+          .from("dre_mensal")
+          .update({ mes, ano })
+          .eq("id", arq.dre_id);
+        if (dreErr) throw dreErr;
+      }
+      // Se houver snapshot, desloca data_referencia em meses
+      if (arq.snapshot_id) {
+        const { data: snap } = await supabase
+          .from("inventario_snapshot")
+          .select("data_referencia, tipo")
+          .eq("id", arq.snapshot_id)
+          .single();
+        if (snap) {
+          const d = new Date(snap.data_referencia + "T00:00:00");
+          const novaData = new Date(ano, mes - 1, d.getDate());
+          const novaRef = `${novaData.getFullYear()}-${String(novaData.getMonth() + 1).padStart(2, "0")}-${String(novaData.getDate()).padStart(2, "0")}`;
+          const { data: confSnap } = await supabase
+            .from("inventario_snapshot")
+            .select("id")
+            .eq("empresa_id", empresaId)
+            .eq("data_referencia", novaRef)
+            .eq("tipo", snap.tipo)
+            .neq("id", arq.snapshot_id)
+            .maybeSingle();
+          if (confSnap) {
+            throw new Error("Já existe inventário desse tipo na data de destino.");
+          }
+          const { error: sErr } = await supabase
+            .from("inventario_snapshot")
+            .update({ data_referencia: novaRef })
+            .eq("id", arq.snapshot_id);
+          if (sErr) throw sErr;
+        }
+      }
+      const { error: updErr } = await supabase
+        .from("arquivos_importados")
+        .update({ mes, ano })
+        .eq("id", arquivo_id);
+      if (updErr) throw updErr;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries();
+      toast.success("Arquivo movido. Troque o período no topo para vê-lo.");
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : "Erro ao mover"),
+  });
+
+  const deleteMut = useMutation({
+    mutationFn: async ({ arquivo_id, cascade }: { arquivo_id: string; cascade: boolean }) => {
+      const { data: arq, error: arqErr } = await supabase
+        .from("arquivos_importados")
+        .select("*")
+        .eq("id", arquivo_id)
+        .single();
+      if (arqErr) throw arqErr;
+
+      if (cascade && arq.dre_id) {
+        await supabase.from("despesas_detalhe").delete().eq("dre_id", arq.dre_id);
+        await supabase.from("dre_mensal").delete().eq("id", arq.dre_id);
+      }
+      if (cascade && arq.snapshot_id) {
+        await supabase.from("inventario_itens").delete().eq("snapshot_id", arq.snapshot_id);
+        await supabase.from("inventario_snapshot").delete().eq("id", arq.snapshot_id);
+      }
+      if (arq.storage_path) {
+        await supabase.storage.from("financial-pdfs").remove([arq.storage_path]);
+      }
+      const { error: delErr } = await supabase
+        .from("arquivos_importados")
+        .delete()
+        .eq("id", arquivo_id);
+      if (delErr) throw delErr;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries();
+      setFormInit(false);
+      toast.success("Importação excluída.");
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : "Erro ao excluir"),
+  });
+
+
   const confirmMut = useMutation({
     mutationFn: async () => {
       if (!empresaId) throw new Error("Empresa não selecionada");
@@ -406,6 +521,20 @@ function Importar() {
                         )}
                       </div>
                     )}
+                    <div className="flex flex-wrap gap-2 pt-2 border-t">
+                      <MovePeriodoButton
+                        arquivoId={arq.id}
+                        mesAtual={arq.mes ?? periodo.mes}
+                        anoAtual={arq.ano ?? periodo.ano}
+                        onMove={(mes, ano) => moveMut.mutate({ arquivo_id: arq.id, mes, ano })}
+                        disabled={moveMut.isPending}
+                      />
+                      <DeleteButton
+                        hasLinks={!!arq.dre_id || !!arq.snapshot_id}
+                        onDelete={(cascade) => deleteMut.mutate({ arquivo_id: arq.id, cascade })}
+                        disabled={deleteMut.isPending}
+                      />
+                    </div>
                   </div>
                 )}
               </CardContent>
@@ -458,3 +587,97 @@ function StatusBadge({ status }: { status: StatusArquivo }) {
   const cur = map[status];
   return <Badge variant={cur.variant} className="gap-1">{cur.icon}{cur.label}</Badge>;
 }
+
+function MovePeriodoButton({
+  arquivoId, mesAtual, anoAtual, onMove, disabled,
+}: { arquivoId: string; mesAtual: number; anoAtual: number; onMove: (mes: number, ano: number) => void; disabled?: boolean }) {
+  const [open, setOpen] = useState(false);
+  const [mes, setMes] = useState(mesAtual);
+  const [ano, setAno] = useState(anoAtual);
+  const meses = Array.from({ length: 12 }, (_, i) => i + 1);
+  const anos = Array.from({ length: 6 }, (_, i) => new Date().getFullYear() - 3 + i);
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button size="sm" variant="outline" disabled={disabled}>
+          <CalendarClock className="h-3 w-3 mr-1" />Mover período
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-64 space-y-3" align="end">
+        <div className="text-sm font-medium">Mover para</div>
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <Label className="text-xs">Mês</Label>
+            <Select value={String(mes)} onValueChange={(v) => setMes(Number(v))}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {meses.map((m) => (
+                  <SelectItem key={m} value={String(m)}>{mesNome(m)}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label className="text-xs">Ano</Label>
+            <Select value={String(ano)} onValueChange={(v) => setAno(Number(v))}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {anos.map((a) => (
+                  <SelectItem key={a} value={String(a)}>{a}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <Button
+          size="sm"
+          className="w-full"
+          disabled={disabled || (mes === mesAtual && ano === anoAtual)}
+          onClick={() => { onMove(mes, ano); setOpen(false); }}
+        >
+          Confirmar
+        </Button>
+        <input type="hidden" value={arquivoId} />
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function DeleteButton({
+  hasLinks, onDelete, disabled,
+}: { hasLinks: boolean; onDelete: (cascade: boolean) => void; disabled?: boolean }) {
+  const [cascade, setCascade] = useState(true);
+  return (
+    <AlertDialog>
+      <AlertDialogTrigger asChild>
+        <Button size="sm" variant="outline" disabled={disabled} className="text-destructive hover:text-destructive">
+          <Trash2 className="h-3 w-3 mr-1" />Excluir
+        </Button>
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Excluir esta importação?</AlertDialogTitle>
+          <AlertDialogDescription>
+            Remove o registro do arquivo e o PDF do storage.
+            {hasLinks && " Este arquivo tem dados vinculados (DRE ou inventário)."}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        {hasLinks && (
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={cascade}
+              onChange={(e) => setCascade(e.target.checked)}
+            />
+            Apagar também a DRE e/ou inventário vinculados
+          </label>
+        )}
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancelar</AlertDialogCancel>
+          <AlertDialogAction onClick={() => onDelete(cascade)}>Excluir</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
