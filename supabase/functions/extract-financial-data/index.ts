@@ -338,15 +338,22 @@ function parseEstoque(text: string): EstoqueParsed {
     lastEnd = matchStart + m[0].length;
     if (!window) continue;
 
-    // Código: primeira sequência de 1-8 dígitos isolada (espaço antes/depois)
-    const codeM = window.match(/(?:^|\s)(\d{1,8})\s+([^\d].*)$/s);
+    // Código + descrição: pega o ÚLTIMO "dígito + texto" da janela.
+    // Isso descarta lixo residual de cabeçalho que tenha sobrado antes
+    // do item real (ex.: data, CNPJ, número do livro).
     let codigo: string | null = null;
     let produto = "";
-    if (codeM) {
-      codigo = codeM[1];
-      produto = codeM[2];
+    const candRe = /(?:^|\s)(\d{1,8})\s+([A-Za-zÀ-ÿ][^]*?)(?=$)/g;
+    // Estratégia simples e robusta: itera todos os matches de "(\d{1,8})\s+<não-dígito>"
+    // ao longo da janela e mantém o último.
+    const iterRe = /(\d{1,8})\s+([A-Za-zÀ-ÿ][^\d][^]*?)(?=(?:\s+\d{1,8}\s+[A-Za-zÀ-ÿ])|$)/g;
+    let lastCand: RegExpExecArray | null = null;
+    for (const c of window.matchAll(iterRe)) lastCand = c as RegExpExecArray;
+    if (lastCand) {
+      codigo = lastCand[1];
+      produto = lastCand[2];
     } else {
-      // fallback: tenta achar qualquer dígito inicial
+      // fallback: primeiro dígito + resto
       const fb = window.match(/(\d{1,8})\s+(.+)$/s);
       if (fb) {
         codigo = fb[1];
