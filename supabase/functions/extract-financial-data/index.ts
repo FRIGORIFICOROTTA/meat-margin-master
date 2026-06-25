@@ -276,12 +276,13 @@ function parseEstoque(text: string): EstoqueParsed {
     flat.match(/\b(\d{2})\/(\d{2})\/(\d{4})\b/);
   if (dataM) data_referencia = `${dataM[3]}-${dataM[2]}-${dataM[1]}`;
 
-  // Total reportado no PDF (antes de remover cabeçalhos)
+  // Total reportado no PDF: pega o ÚLTIMO match (rodapé "Total Geral"),
+  // não o primeiro (que pode ser um "valor total" intermediário/de página).
   let totalReportado: number | null = null;
   const totalRe =
-    /(?:total\s+(?:geral|do\s+invent[aá]rio|do\s+estoque)|valor\s+total(?:\s+do\s+estoque)?)\s*[:R$\s]*?(\d{1,3}(?:\.\d{3})*(?:,\d+)?)/i;
-  const tM = flat.match(totalRe);
-  if (tM) totalReportado = parseBR(tM[1]);
+    /(?:total\s+(?:geral|do\s+invent[aá]rio|do\s+estoque)|valor\s+total(?:\s+do\s+estoque)?)\s*[:R$\s]*?(\d{1,3}(?:\.\d{3})*(?:,\d+)?)/gi;
+  const tMatches = [...flat.matchAll(totalRe)];
+  if (tMatches.length) totalReportado = parseBR(tMatches[tMatches.length - 1][1]);
 
   // Remove cabeçalhos/rodapés repetidos (substitui por espaço para não colar tokens)
   const noise: RegExp[] = [
@@ -293,6 +294,14 @@ function parseEstoque(text: string): EstoqueParsed {
     /relat[oó]rio\s+de\s+estoque/gi,
     /emitido\s+em[:\s]+\d{2}\/\d{2}\/\d{4}(?:\s+\d{2}:\d{2}(?::\d{2})?)?/gi,
     /\bfls?\.\s*\d+\b/gi,
+    // Data por extenso (com ou sem hora): "30 de abril de 2026 22:02:44"
+    /\b\d{1,2}\s+de\s+(?:janeiro|fevereiro|mar[cç]o|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)\s+de\s+\d{4}(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?/gi,
+    // Cabeçalho fiscal repetido entre páginas
+    /\bempresa\s*:\s*[^:]*?(?=\s+(?:ie|cnpj|livro|folha)\s*:)/gi,
+    /\bie\s*:\s*[\d.\-/]+/gi,
+    /\bcnpj\s*:\s*\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}/gi,
+    /\blivro\s*:\s*\d+/gi,
+    /\bfolha\s*:\s*\d+/gi,
   ];
   for (const rx of noise) flat = flat.replace(rx, " ");
   flat = flat.replace(/[ ]+/g, " ").trim();
