@@ -72,19 +72,19 @@ function DrePage() {
     );
   }
 
-  const { empresa, dre, despesas } = dreQ.data;
+  const { empresa, dre, despesas, lancamentos } = dreQ.data;
   const regime = (empresa?.regime_tributario as RegimeTributario) ?? "simples";
-  const fiscal = calcularDREFiscal(
-    {
-      total_vendas: Number(dre.total_vendas),
-      cmv: Number(dre.cmv),
-      variacao_estoque: Number(dre.variacao_estoque),
-      total_despesas: Number(dre.total_despesas),
-      devolucoes: Number(dre.devolucoes ?? 0),
-    },
-    regime,
-    (empresa?.config_tributaria as ConfigTributaria | null) ?? null,
-  );
+  const dreInput = {
+    total_vendas: Number(dre.total_vendas),
+    cmv: Number(dre.cmv),
+    variacao_estoque: Number(dre.variacao_estoque),
+    total_despesas: Number(dre.total_despesas),
+    devolucoes: Number(dre.devolucoes ?? 0),
+  };
+  const cfg = (empresa?.config_tributaria as ConfigTributaria | null) ?? null;
+  const fiscalEstimado = calcularDREFiscal(dreInput, regime, cfg);
+  const fiscalReal = calcularDREFiscalReal(dreInput, regime, cfg, lancamentos as any);
+  const fiscal = fiscalSrc === "real" ? fiscalReal : fiscalEstimado;
 
   const v = Number(dre.total_vendas);
   const pct = (n: number) => (v > 0 ? n / v : 0);
