@@ -333,18 +333,31 @@ function FiscalPage() {
                             =
                           </Button>
                         )}
-                        <Button size="sm" onClick={() => saveMut.mutate(r)} disabled={saveMut.isPending}>
+                        <Button size="sm" onClick={() => saveMut.mutate(r)} disabled={saveMut.isPending} title="Salvar">
                           <Save className="h-4 w-4" />
                         </Button>
-                        {r.id && (
+                        {isOutro ? (
                           <Button
                             size="sm"
                             variant="destructive"
-                            onClick={() => deleteMut.mutate(r.id!)}
+                            onClick={() => removeRow(i)}
                             disabled={deleteMut.isPending}
+                            title="Excluir ajuste"
                           >
                             <Trash2 className="h-4 w-4" />
                           </Button>
+                        ) : (
+                          r.id && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => limparTributo(i)}
+                              disabled={deleteMut.isPending}
+                              title="Limpar valor lançado"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          )
                         )}
                       </div>
                     </td>
