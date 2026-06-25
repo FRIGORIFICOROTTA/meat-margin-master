@@ -295,7 +295,7 @@ function EditDreDialog({
       const totalDespesas = form.despesas.reduce((s, d) => s + (Number(d.valor) || 0), 0);
       const resultadoBruto = form.total_vendas - form.devolucoes - form.cmv;
       const variacao = form.estoque_inicial - form.estoque_final;
-      const resultadoLiq = resultadoBruto - totalDespesas;
+      const resultadoLiq = resultadoBruto - variacao - totalDespesas;
       const { data: dreRow, error } = await supabase
         .from("dre_mensal")
         .upsert(
