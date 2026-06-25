@@ -9,7 +9,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { fmtBRL, fmtPct, mesNome } from "@/lib/finance";
 import { cn } from "@/lib/utils";
-import { calcularDREFiscal, REGIME_LABEL, type RegimeTributario, type ConfigTributaria } from "@/lib/fiscal";
+import { calcularDREFiscal, calcularDREFiscalReal, REGIME_LABEL, type RegimeTributario, type ConfigTributaria } from "@/lib/fiscal";
 import { exportDREPdf, exportDREExcel, type LinhaExport } from "@/lib/export-utils";
 import { FileDown, FileSpreadsheet, Pencil } from "lucide-react";
 import { DreEditor, type DreFormValues, emptyDreValues } from "@/components/DreEditor";
@@ -24,6 +24,7 @@ function DrePage() {
   const [empresaId] = useEmpresaSelecionada();
   const [periodo] = usePeriodo();
   const [modo, setModo] = useState<"gerencial" | "fiscal">("gerencial");
+  const [fiscalSrc, setFiscalSrc] = useState<"estimado" | "real">("estimado");
   const [editing, setEditing] = useState(false);
   const qc = useQueryClient();
 
@@ -50,7 +51,14 @@ function DrePage() {
         .from("despesas_detalhe")
         .select("*")
         .eq("dre_id", dre.id);
-      return { empresa, dre, despesas: despesas ?? [] };
+      const { data: lancamentos } = await supabase
+        .from("lancamentos_fiscais")
+        .select("tipo, label, valor_real, sinal")
+        .eq("empresa_id", empresaId!)
+        .eq("mes", periodo.mes)
+        .eq("ano", periodo.ano)
+        .is("deleted_at", null);
+      return { empresa, dre, despesas: despesas ?? [], lancamentos: lancamentos ?? [] };
     },
   });
 
@@ -64,19 +72,19 @@ function DrePage() {
     );
   }
 
-  const { empresa, dre, despesas } = dreQ.data;
+  const { empresa, dre, despesas, lancamentos } = dreQ.data;
   const regime = (empresa?.regime_tributario as RegimeTributario) ?? "simples";
-  const fiscal = calcularDREFiscal(
-    {
-      total_vendas: Number(dre.total_vendas),
-      cmv: Number(dre.cmv),
-      variacao_estoque: Number(dre.variacao_estoque),
-      total_despesas: Number(dre.total_despesas),
-      devolucoes: Number(dre.devolucoes ?? 0),
-    },
-    regime,
-    (empresa?.config_tributaria as ConfigTributaria | null) ?? null,
-  );
+  const dreInput = {
+    total_vendas: Number(dre.total_vendas),
+    cmv: Number(dre.cmv),
+    variacao_estoque: Number(dre.variacao_estoque),
+    total_despesas: Number(dre.total_despesas),
+    devolucoes: Number(dre.devolucoes ?? 0),
+  };
+  const cfg = (empresa?.config_tributaria as ConfigTributaria | null) ?? null;
+  const fiscalEstimado = calcularDREFiscal(dreInput, regime, cfg);
+  const fiscalReal = calcularDREFiscalReal(dreInput, regime, cfg, lancamentos as any);
+  const fiscal = fiscalSrc === "real" ? fiscalReal : fiscalEstimado;
 
   const v = Number(dre.total_vendas);
   const pct = (n: number) => (v > 0 ? n / v : 0);
@@ -161,13 +169,21 @@ function DrePage() {
             {empresa?.nome} · {mesNome(periodo.mes)}/{periodo.ano} · {REGIME_LABEL[regime]}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <Tabs value={modo} onValueChange={(v) => setModo(v as any)}>
             <TabsList>
               <TabsTrigger value="gerencial">Gerencial</TabsTrigger>
               <TabsTrigger value="fiscal">Fiscal</TabsTrigger>
             </TabsList>
           </Tabs>
+          {modo === "fiscal" && (
+            <Tabs value={fiscalSrc} onValueChange={(v) => setFiscalSrc(v as any)}>
+              <TabsList>
+                <TabsTrigger value="estimado">Estimado</TabsTrigger>
+                <TabsTrigger value="real">Real</TabsTrigger>
+              </TabsList>
+            </Tabs>
+          )}
           <Button variant="default" size="sm" onClick={() => setEditing(true)}>
             <Pencil className="h-4 w-4 mr-1" /> Editar
           </Button>
@@ -180,6 +196,12 @@ function DrePage() {
         </div>
 
       </div>
+
+      {modo === "fiscal" && fiscalSrc === "real" && fiscalReal.faltando.length > 0 && (
+        <div className="rounded border border-amber-300 bg-amber-50 dark:bg-amber-950/20 p-3 text-sm">
+          <strong>{fiscalReal.faltando.length}</strong> tributo(s) sem lançamento real ({fiscalReal.faltando.join(", ").toUpperCase()}) — usando estimativa para esses. <a href="/fiscal" className="underline">Lançar agora</a>.
+        </div>
+      )}
 
       <Card>
         <CardHeader>

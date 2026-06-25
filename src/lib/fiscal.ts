@@ -141,6 +141,163 @@ export function calcularDREFiscal(
   };
 }
 
+// ---------------- DRE Fiscal REAL (com lançamentos efetivos) ----------------
+
+export type TipoLancamentoFiscal = "das" | "pis" | "cofins" | "icms" | "iss" | "irpj" | "csll" | "outros";
+
+export type LancamentoFiscal = {
+  tipo: TipoLancamentoFiscal;
+  label?: string | null;
+  valor_real: number;
+  sinal?: number; // +1 despesa, -1 crédito
+};
+
+export type DREFiscalReal = DREFiscal & {
+  origem: Record<string, "real" | "estimado">;
+  faltando: TipoLancamentoFiscal[];
+  ajustes_outros: number;
+  total_estimado_referencia: number;
+};
+
+const LABEL_TRIBUTO: Record<TipoLancamentoFiscal, string> = {
+  das: "DAS (Simples Nacional)",
+  pis: "PIS",
+  cofins: "COFINS",
+  icms: "ICMS",
+  iss: "ISS",
+  irpj: "IRPJ",
+  csll: "CSLL",
+  outros: "Ajuste fiscal",
+};
+
+export function calcularDREFiscalReal(
+  dre: DREInput,
+  regime: RegimeTributario,
+  configRaw: ConfigTributaria | null | undefined,
+  lancamentos: LancamentoFiscal[],
+): DREFiscalReal {
+  const estimado = calcularDREFiscal(dre, regime, configRaw);
+
+  // Map tipo -> soma de lançamentos reais (sinal aplicado)
+  const realPorTipo = new Map<TipoLancamentoFiscal, number>();
+  let ajustes_outros = 0;
+  for (const l of lancamentos) {
+    const s = (l.sinal ?? 1) * Number(l.valor_real || 0);
+    if (l.tipo === "outros") {
+      ajustes_outros += s;
+    } else {
+      realPorTipo.set(l.tipo, (realPorTipo.get(l.tipo) ?? 0) + s);
+    }
+  }
+
+  const tributosRegime: TipoLancamentoFiscal[] =
+    regime === "simples" ? ["das"] : ["pis", "cofins", "icms", "irpj", "csll"];
+
+  const origem: Record<string, "real" | "estimado"> = {};
+  const faltando: TipoLancamentoFiscal[] = [];
+
+  // Reconstrói breakdown
+  const impostos_breakdown: Array<{ label: string; valor: number }> = [];
+  let impostos_oper_total = 0; // PIS/COFINS/ICMS/ISS/DAS
+  let irpj_real = estimado.irpj;
+  let csll_real = estimado.csll;
+
+  function resolveTipo(tipo: TipoLancamentoFiscal, estimadoValor: number): number {
+    if (realPorTipo.has(tipo)) {
+      origem[tipo] = "real";
+      return realPorTipo.get(tipo) ?? 0;
+    }
+    if (estimadoValor > 0) faltando.push(tipo);
+    origem[tipo] = "estimado";
+    return estimadoValor;
+  }
+
+  if (regime === "simples") {
+    const dasEst = estimado.impostos_breakdown.find((b) => b.label.startsWith("DAS"))?.valor ?? 0;
+    const v = resolveTipo("das", dasEst);
+    impostos_breakdown.push({ label: LABEL_TRIBUTO.das, valor: v });
+    impostos_oper_total += v;
+  } else {
+    for (const t of ["pis", "cofins", "icms"] as TipoLancamentoFiscal[]) {
+      const est = estimado.impostos_breakdown.find((b) => b.label === LABEL_TRIBUTO[t])?.valor ?? 0;
+      const v = resolveTipo(t, est);
+      impostos_breakdown.push({ label: LABEL_TRIBUTO[t], valor: v });
+      impostos_oper_total += v;
+    }
+    const issEst = estimado.impostos_breakdown.find((b) => b.label === "ISS")?.valor ?? 0;
+    if (issEst > 0 || realPorTipo.has("iss")) {
+      const v = resolveTipo("iss", issEst);
+      impostos_breakdown.push({ label: LABEL_TRIBUTO.iss, valor: v });
+      impostos_oper_total += v;
+    }
+    irpj_real = resolveTipo("irpj", estimado.irpj);
+    csll_real = resolveTipo("csll", estimado.csll);
+  }
+
+  if (ajustes_outros !== 0) {
+    impostos_breakdown.push({ label: "Ajustes fiscais (outros)", valor: ajustes_outros });
+    impostos_oper_total += ajustes_outros;
+  }
+
+  const receita_liquida = estimado.receita_bruta - estimado.devolucoes - impostos_oper_total;
+  const cmv_ajustado = dre.cmv;
+  const lucro_bruto = receita_liquida - cmv_ajustado;
+  const despesas_operacionais = dre.total_despesas;
+  const lucro_antes_ir = lucro_bruto - despesas_operacionais;
+  const resultado_liquido_fiscal = lucro_antes_ir - irpj_real - csll_real;
+
+  // ignora tributos que de fato deveriam existir mas estão zerados na estimativa também
+  tributosRegime.forEach((t) => {
+    if (!origem[t]) origem[t] = realPorTipo.has(t) ? "real" : "estimado";
+  });
+
+  return {
+    receita_bruta: estimado.receita_bruta,
+    devolucoes: estimado.devolucoes,
+    impostos_total: impostos_oper_total,
+    impostos_breakdown,
+    receita_liquida,
+    cmv_ajustado,
+    lucro_bruto,
+    despesas_operacionais,
+    lucro_antes_ir,
+    irpj: irpj_real,
+    csll: csll_real,
+    resultado_liquido_fiscal,
+    origem,
+    faltando: Array.from(new Set(faltando)),
+    ajustes_outros,
+    total_estimado_referencia: estimado.impostos_total + estimado.irpj + estimado.csll,
+  };
+}
+
+export const TRIBUTO_LABEL = LABEL_TRIBUTO;
+
+export function tributosDoRegime(regime: RegimeTributario): TipoLancamentoFiscal[] {
+  return regime === "simples"
+    ? ["das"]
+    : ["pis", "cofins", "icms", "iss", "irpj", "csll"];
+}
+
+export function estimativaPorTributo(
+  dre: DREInput,
+  regime: RegimeTributario,
+  configRaw: ConfigTributaria | null | undefined,
+): Record<TipoLancamentoFiscal, number> {
+  const e = calcularDREFiscal(dre, regime, configRaw);
+  const map: Partial<Record<TipoLancamentoFiscal, number>> = {};
+  for (const t of tributosDoRegime(regime)) {
+    if (t === "irpj") map[t] = e.irpj;
+    else if (t === "csll") map[t] = e.csll;
+    else {
+      const lbl = LABEL_TRIBUTO[t];
+      map[t] = e.impostos_breakdown.find((b) => b.label === lbl || b.label.startsWith(lbl))?.valor ?? 0;
+    }
+  }
+  map.outros = 0;
+  return map as Record<TipoLancamentoFiscal, number>;
+}
+
 export const REGIME_LABEL: Record<RegimeTributario, string> = {
   simples: "Simples Nacional",
   presumido: "Lucro Presumido",

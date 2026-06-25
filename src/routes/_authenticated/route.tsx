@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/select";
 import { MESES } from "@/lib/finance";
 import { Toaster } from "sonner";
-import { LayoutDashboard, Upload, FileBarChart2, Boxes, Settings, LogOut, Receipt } from "lucide-react";
+import { LayoutDashboard, Upload, FileBarChart2, Boxes, Settings, LogOut, Receipt, Landmark } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated")({
   ssr: false,
@@ -107,6 +107,9 @@ function AuthLayout() {
             </NavLink>
             <NavLink to="/despesas" icon={<Receipt className="h-4 w-4" />}>
               Despesas
+            </NavLink>
+            <NavLink to="/fiscal" icon={<Landmark className="h-4 w-4" />}>
+              Fiscal
             </NavLink>
             <NavLink to="/estoque" icon={<Boxes className="h-4 w-4" />}>
               Estoque

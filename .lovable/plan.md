@@ -1,32 +1,67 @@
-## Plano: ajustes na importação
+## Objetivo
 
-### 1. Resultado líquido sem variação de estoque
-Confirmado pelo usuário — manter o cálculo atual. Sem alterações de código.
+Hoje a DRE Fiscal é **estimada** aplicando as alíquotas-padrão do regime sobre a receita. Para fechar o **resultado real**, você precisa lançar os **impostos efetivamente apurados/pagos no mês** (DAS, ICMS, PIS, COFINS, IRPJ, CSLL etc.) e quaisquer ajustes (créditos, retenções, multas/juros). O plano abaixo cria essa camada de "lançamentos fiscais reais" e faz a DRE Fiscal usar **Real** quando existir, caindo para a **Estimativa** quando não houver lançamento.
 
-### 2. Pré-lançamento do Estoque Inicial a partir do Estoque Final do mês anterior
-Quando o usuário abrir `/importar` em um mês que ainda não tem `estoque_inicial`, buscar automaticamente o `estoque_final` do mês imediatamente anterior (mesma empresa) e usá-lo como pré-lançamento.
+## O que muda para o usuário
 
-Comportamento:
-- Só pré-popula se **não existir** snapshot `inicial` no mês corrente (não sobrescreve dados reais).
-- Mostra um banner discreto: "Estoque inicial pré-lançado a partir do estoque final de {mês anterior} — confirme ou edite". Botão "Confirmar" persiste como snapshot `inicial` do mês corrente (copiando total e itens). Botão "Descartar" remove a sugestão e permite upload normal.
-- Não cria `arquivos_importados` falso — o snapshot fica marcado com origem `derivado_mes_anterior` (novo valor em campo `observacao`/metadata existente, sem mudança de schema; gravamos no `config` da DRE ou em um campo texto já disponível).
-- Implementação: nova query `estoqueFinalAnteriorQ` em `importar.tsx`; ação `confirmarPreLancamentoEstoque` que insere em `inventario_snapshot` + `inventario_itens` clonando o anterior.
+1. **Nova tela `/fiscal`** (no menu, ao lado da DRE) por empresa/mês:
+   - Lista os tributos do regime da empresa (Simples → DAS; Presumido/Real → PIS, COFINS, ICMS, ISS opcional, IRPJ, CSLL).
+   - Para cada tributo: campo **Valor Estimado** (calculado, somente leitura) e **Valor Real** (editável), com **data de pagamento**, **competência**, **observação** e anexo opcional (guia/DARF em PDF).
+   - Botão **"Usar estimativa"** preenche o real com o calculado (útil para meses já fechados sem guia em mãos).
+   - Linha extra **"Ajustes fiscais"** (livre, +/-) para retenções de clientes, créditos de PIS/COFINS, etc.
+   - Totalizador: **Total Estimado**, **Total Real**, **Diferença (R$ e %)**.
 
-### 3. Duplicidade de despesas (categorias somando subcategorias)
-**Diagnóstico:** o PDF de DRE traz, no plano de contas, **linhas-resumo de categoria** (ex: "Despesas com Pessoal  12.345,67  3,12") seguidas das **subcategorias** que compõem aquela categoria (Salários, Encargos, etc.). O parser atual (`parseDRE`, regex `tripleRe`) captura **as duas**, então a soma de `despesas_detalhe` dobra: paga categoria + soma das subcategorias.
+2. **DRE Fiscal (`/dre` aba Fiscal)** passa a ter um seletor:
+   - **Estimado** (comportamento atual) e **Real** (usa os lançamentos).
+   - Quando "Real" e faltar algum tributo lançado, mostra aviso "X tributos sem lançamento — usando estimativa para esses".
+   - Comparativo Gerencial × Fiscal ganha terceira coluna **Fiscal Real**.
 
-**Correção no `supabase/functions/extract-financial-data/index.ts`:**
-- Detectar linhas-resumo de categoria e descartar, mantendo apenas as folhas (subcategorias).
-- Estratégia: após capturar todas as triplas, agrupar por nome candidato a categoria; se o valor de uma linha for **≈ soma das linhas seguintes** dentro de uma janela (tolerância 1%), marcar como cabeçalho e excluí-la.
-- Reforço por rótulo: lista de nomes conhecidos de cabeçalho ("Despesas Operacionais", "Despesas com Pessoal", "Despesas Administrativas", "Despesas Financeiras", "Despesas com Vendas", "Tributos", "Outras Despesas") — quando o nome bate e existe pelo menos uma subcategoria abaixo, descartar.
-- Validar com o PDF real (já temos o de Maio/Formosa) via `code--execute_preview_javascript` antes de finalizar: a soma de `despesas_detalhe` deve bater com `total_despesas` extraído.
+3. **Dashboard**: KPI "Carga tributária efetiva" (Total Real / Receita Bruta) e gráfico mensal Estimado × Real.
 
-**Migração de dados existentes:** botão **"Reprocessar"** já existente em `/importar` resolve para os arquivos do usuário (limpa `despesas_detalhe` e recria). Não há migração SQL.
+## Estrutura de dados (nova tabela)
 
-### Ordem de execução
-1. Fix do parser de despesas (#3) — maior impacto, valida com PDF real.
-2. Pré-lançamento de estoque (#2) — nova UI + ação no `importar.tsx`.
+`lancamentos_fiscais`
+- `id uuid pk`
+- `empresa_id uuid fk empresas`
+- `mes int`, `ano int` (competência)
+- `tipo text` — enum aplicacional: `das | pis | cofins | icms | iss | irpj | csll | outros`
+- `label text` — rótulo livre (usado quando `tipo = 'outros'`, ex.: "Retenção INSS")
+- `valor_real numeric(14,2)` — valor pago/apurado
+- `valor_estimado numeric(14,2)` — snapshot no momento do lançamento (auditoria)
+- `data_pagamento date` (opcional)
+- `observacao text` (opcional)
+- `arquivo_path text` (opcional, bucket `financial-pdfs`)
+- `sinal smallint default 1` — +1 despesa, -1 crédito/ajuste positivo
+- `created_at`, `updated_at`, `deleted_at` (soft delete)
+- **Unique** parcial `(empresa_id, mes, ano, tipo, label)` para idempotência
+- **RLS** análoga às demais tabelas (`user_has_empresa_access`), com `GRANT` para `authenticated` e `service_role`
 
-### Fora do escopo
-- Não mexer no cálculo de resultado líquido (#1 mantém-se).
-- Sem alterações de schema.
+## Lógica de cálculo
+
+Em `src/lib/fiscal.ts` adicionar `calcularDREFiscalReal(dre, regime, config, lancamentos)`:
+- Para cada tributo do regime: usa `valor_real` se houver lançamento ativo, senão usa o estimado.
+- Soma `outros` ao bloco "Impostos" (sinal +/-).
+- Mantém o restante do cálculo (receita líquida, lucro bruto, lucro antes IR/CSLL, resultado fiscal).
+- Retorna também `cobertura: { tributo, origem: 'real'|'estimado' }[]` para a UI exibir os avisos.
+
+## Telas e componentes
+
+- `src/routes/_authenticated/fiscal.tsx` — listagem + edição inline (mês corrente do seletor de período).
+- `src/components/LancamentoFiscalRow.tsx` — linha editável (estimado | real | dif | data | anexo | salvar).
+- `src/routes/_authenticated/dre.tsx` — Tabs adicional "Estimado/Real" dentro do modo Fiscal; usa novo cálculo.
+- Atualizar `exportDREPdf`/`exportDREExcel` para incluir a coluna **Real** quando aplicável.
+- Item de menu **Fiscal** no layout `_authenticated`.
+
+## Fluxo recomendado de uso
+
+1. Importar PDFs (DRE/Estoque) como hoje → DRE Gerencial pronta.
+2. Abrir **Fiscal** no mesmo mês → revisar os valores estimados, lançar os reais conforme guias pagas, anexar comprovantes.
+3. Voltar para **DRE → Fiscal → Real** e ver o resultado líquido efetivo.
+
+## Fora do escopo desta fatia
+
+- Conciliação automática com extrato bancário.
+- OCR de guias DARF/DAS.
+- Apuração de crédito de ICMS por NF-e.
+
+Posso seguir e implementar?
