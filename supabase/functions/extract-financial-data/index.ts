@@ -257,65 +257,52 @@ interface EstoqueParsed {
 }
 
 function parseEstoque(text: string): EstoqueParsed {
-  const lines = text
-    .split(/\r?\n/)
-    .map((l) => l.replace(/[ \t]+/g, " ").trim())
-    .filter(Boolean);
+  // Normaliza espaços
+  const flat = text.replace(/\u00A0/g, " ").replace(/[ \t]+/g, " ");
+
+  // CNPJ e data de referência (operam no texto bruto, não dependem de \n)
+  let cnpj: string | null = null;
+  const cnpjM = flat.match(/\b(\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2})\b/);
+  if (cnpjM) cnpj = cnpjM[1];
+
+  let data_referencia: string | null = null;
+  const dataM =
+    flat.match(/Estoque\s+existente\s+em[:\s]+(\d{2})\/(\d{2})\/(\d{4})/i) ||
+    flat.match(/\b(\d{2})\/(\d{2})\/(\d{4})\b/);
+  if (dataM) data_referencia = `${dataM[3]}-${dataM[2]}-${dataM[1]}`;
+
+  // Regex de item embutida no texto contínuo:
+  //   código (1-8 dígitos) + descrição (não-greedy) + unidade + qtd + vu + vt (números BR)
+  // Unidades ordenadas do mais longo para o mais curto p/ evitar UN casar antes de UNID.
+  const UNI = "UNID|KG|PCT|PC|CX|LT|MT|DZ|GR|ML|UN|G|L";
+  const num = "\\d{1,3}(?:\\.\\d{3})*(?:,\\d+)?|\\d+(?:[.,]\\d+)?";
+  const itemRe = new RegExp(
+    `\\b(\\d{1,8})\\s+([A-Za-zÀ-ÿ0-9ºª°./\\-\\(\\)\\s]+?)\\s+(${UNI})\\s+(${num})\\s+(${num})\\s+(${num})(?=\\s|$)`,
+    "g",
+  );
 
   const warnings: string[] = [];
   const itens: EstoqueParsed["itens"] = [];
-
-  // CNPJ
-  let cnpj: string | null = null;
-  for (const ln of lines) {
-    const m = ln.match(/\b(\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2})\b/);
-    if (m) {
-      cnpj = m[1];
-      break;
-    }
-  }
-
-  // Data de referência
-  let data_referencia: string | null = null;
-  for (const ln of lines) {
-    const m = ln.match(/\b(\d{2})\/(\d{2})\/(\d{4})\b/);
-    if (m) {
-      data_referencia = `${m[3]}-${m[2]}-${m[1]}`;
-      break;
-    }
-  }
-
-  // Linhas de item: heurística — uma linha com ao menos 3 números (qtd, vlr unit, vlr total) no fim.
-  // Ex: "01001 ALCATRA KG 12,500 35,90 448,75"
-  const itemRe = /^(.*?)\s+([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)$/;
-  const unidadeRe = /\b(KG|UN|PC|PCT|CX|LT|MT|DZ|GR|G|ML|L)\b/i;
-
+  const seen = new Set<string>();
   let totalValor = 0;
-  for (const ln of lines) {
-    const m = ln.match(itemRe);
-    if (!m) continue;
-    const labelPart = m[1].trim();
-    const qtd = parseBR(m[2]);
-    const vu = parseBR(m[3]);
-    const vt = parseBR(m[4]);
+
+  for (const m of flat.matchAll(itemRe)) {
+    const codigo = m[1];
+    let produto = m[2].replace(/\s+/g, " ").trim();
+    const unidade = m[3].toUpperCase();
+    const qtd = parseBR(m[4]);
+    const vu = parseBR(m[5]);
+    const vt = parseBR(m[6]);
     if (qtd === null || vu === null || vt === null) continue;
     if (vt <= 0) continue;
-    // tenta separar código no início
-    let codigo: string | null = null;
-    let produto = labelPart;
-    const codMatch = labelPart.match(/^(\d{2,8})\s+(.+)$/);
-    if (codMatch) {
-      codigo = codMatch[1];
-      produto = codMatch[2];
-    }
-    // unidade dentro do produto?
-    let unidade: string | null = null;
-    const uMatch = produto.match(unidadeRe);
-    if (uMatch) {
-      unidade = uMatch[1].toUpperCase();
-      produto = produto.replace(unidadeRe, "").replace(/\s+/g, " ").trim();
-    }
+    // descarta lixo curto / cabeçalhos
     if (produto.length < 2) continue;
+    if (/^p[aá]gina$/i.test(produto)) continue;
+    // deduplica (mesmo código + valor_total) — cabeçalhos repetidos entre páginas
+    const key = `${codigo}|${vt.toFixed(2)}|${qtd}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
     itens.push({
       codigo,
       produto,
@@ -327,14 +314,17 @@ function parseEstoque(text: string): EstoqueParsed {
     totalValor += vt;
   }
 
-  // Total reportado no PDF (se houver), prevalece
-  const totalReportado = captureNumberByLabel(lines, [
-    /total\s+(geral|do\s+invent[aá]rio|do\s+estoque)/i,
-    /valor\s+total/i,
-  ]);
+  // Total reportado no PDF (se houver)
+  let totalReportado: number | null = null;
+  const totalRe =
+    /(?:total\s+(?:geral|do\s+invent[aá]rio|do\s+estoque)|valor\s+total(?:\s+do\s+estoque)?)\s*[:R$\s]*?(\d{1,3}(?:\.\d{3})*(?:,\d+)?)/i;
+  const tM = flat.match(totalRe);
+  if (tM) totalReportado = parseBR(tM[1]);
 
-  if (itens.length === 0) warnings.push("Nenhum item detectado automaticamente — adicione manualmente.");
-  if (!data_referencia) warnings.push("Data de referência não detectada — preencha manualmente.");
+  if (itens.length === 0)
+    warnings.push("Nenhum item detectado automaticamente — adicione manualmente.");
+  if (!data_referencia)
+    warnings.push("Data de referência não detectada — preencha manualmente.");
 
   return {
     filial: null,
@@ -344,7 +334,7 @@ function parseEstoque(text: string): EstoqueParsed {
     total_valor: totalReportado ?? (totalValor > 0 ? totalValor : null),
     itens,
     __warnings: warnings,
-    __raw_preview: lines.slice(0, 60).join("\n"),
+    __raw_preview: flat.slice(0, 2000),
   };
 }
 

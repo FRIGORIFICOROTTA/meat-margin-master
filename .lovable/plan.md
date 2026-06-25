@@ -1,25 +1,36 @@
-## Problema
+# Causa raiz
 
-Você importou os PDFs no período errado (Junho) e quando tentou reimportar em Maio, o sistema bloqueou porque o hash do arquivo já existe vinculado a outro período. Hoje a tela `/importar` não tem como excluir um arquivo importado nem mover ele de período — por isso você ficou travado.
+Olhei o `__raw_preview` do arquivo "ESTOQUE 31 MAIO FORMOSA.pdf" no banco. O `unpdf` está devolvendo **todo o relatório em uma única linha gigante** (sem `\n` entre os itens). O parser atual faz:
 
-## Solução
+```ts
+const lines = text.split(/\r?\n/)...
+const itemRe = /^(.*?)\s+([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)$/;
+```
 
-Adicionar dois controles em cada card de arquivo importado em `/importar`:
+Como só existe 1 linha contendo o relatório inteiro, a regex ancorada em `^...$` nunca casa → 0 itens → aviso "Nenhum item detectado automaticamente". O CNPJ e a data de referência são detectados porque não dependem de quebra de linha, e por isso o cartão aparece como "Extraído" mesmo com 0 itens.
 
-1. **Mover para outro período** — abre um pequeno seletor de Mês/Ano. Reatribui o `arquivos_importados.mes/ano` e, se houver `dre_id` ou `snapshot_id` vinculados, atualiza o `mes/ano` do `dre_mensal` e a `data_referencia` do `inventario_snapshot` correspondente. É a opção certa pro seu caso: você só move tudo de Junho → Maio sem reprocessar nada.
-2. **Excluir importação** — remove o registro de `arquivos_importados`, apaga o PDF do storage, e (com confirmação) apaga também o `dre_mensal` + `despesas_detalhe` e/ou `inventario_snapshot` + `inventario_itens` vinculados àquele arquivo. Útil quando você quer recomeçar do zero.
+O DRE provavelmente funciona porque o layout repete rótulos únicos (Receita Bruta, CMV…) que ainda casam via `findLineWith`, mas o inventário depende de linhas por item.
 
-Antes de mover, o sistema valida se já existe DRE no período-destino pra mesma empresa e avisa pra evitar conflito com a constraint `unique(empresa_id, mes, ano)`.
+# Correção
 
-## Onde mexe
+Na Edge Function `supabase/functions/extract-financial-data/index.ts`, função `parseEstoque`:
 
-- `src/routes/_authenticated/importar.tsx`: adiciona botões "Mover período" e "Excluir" no card de cada arquivo, com `AlertDialog` de confirmação para exclusão e um `Popover` com selects Mês/Ano para mover.
-- Sem mudanças de schema, sem mudanças em Edge Function. Tudo cliente + Supabase via RLS já existente.
+1. **Re-linhar o texto antes do parse.** Antes do `split(/\r?\n/)`, normalizar:
+   - inserir `\n` antes de cada token que pareça início de item: `código (2-8 dígitos) + descrição + unidade (KG|UNID|UN|PC|...) + 3 números BR no fim`.
+   - Padrão proposto: inserir `\n` antes de `\b(\d{2,8})\s+(?=[A-ZÀ-Úa-zà-ú])` quando, dentro dos ~120 chars seguintes, houver `\b(KG|UNID|UN|PC|PCT|CX|LT|DZ|G|ML|L)\b` seguido de três grupos numéricos BR.
+   - Como fallback, também quebrar antes de cabeçalhos repetidos ("Código Produto Unid Qtde V.Unit V.Total", "Página X de Y", "Livro de registro de inventário", "Estoque existente em:") para isolar páginas.
 
-## Fluxo pro seu caso concreto
+2. **Aceitar `UNID` na lista de unidades** (hoje o regex tem `UN` mas o PDF usa `UNID`). Adicionar `UNID` ao `unidadeRe` e à ordem de match (mais longo primeiro: `UNID|KG|PCT|...|UN|...`).
 
-1. Vá em `/importar` com a empresa da filial selecionada e o período em **Junho**.
-2. Em cada um dos 3 cards (DRE, Estoque Inicial, Estoque Final), clique em **Mover período** → selecione **Maio** → confirme.
-3. Troque o seletor de período do topo pra Maio e os dados aparecem lá, já vinculados corretamente. Nenhum reprocessamento, nenhum PDF reenviado.
+3. **Tolerar item sem quebra perfeita.** Em vez de exigir `^...$`, varrer linha por linha procurando ocorrências do padrão item via `matchAll`, para o caso de duas linhas colarem.
 
-Alternativa, se preferir refazer: clique em **Excluir** nos 3 cards em Junho (marca também "apagar DRE/estoque vinculados"), troque pro Maio, reimporte os mesmos PDFs.
+4. **Capturar total reportado** ampliando os rótulos: `total\s+geral`, `valor\s+total\s+do\s+estoque`, `total\s+do\s+invent[aá]rio`, e também a última ocorrência de "Total ... R$ X" no fim do documento.
+
+5. **Manter `__raw_preview`** (primeiros ~2000 chars) para diagnóstico futuro.
+
+Sem mudanças no DRE, no schema ou no front-end. Depois de aplicado, basta clicar **"Forçar reprocessar"** no card de Estoque para re-extrair sem precisar re-upload.
+
+# Validação
+
+- Reprocessar o arquivo `579f98b9-...` (ESTOQUE 31 MAIO FORMOSA) e verificar via `supabase--read_query` que `extracted_json->'itens'` tem comprimento > 0 e `total_valor` é numérico.
+- Confirmar no preview que o card mostra contagem de itens e total, sem o aviso amarelo.
