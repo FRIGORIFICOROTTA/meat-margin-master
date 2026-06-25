@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { sha256Hex, mesNome } from "@/lib/finance";
 import { toast } from "sonner";
 import {
-  FileText, CheckCircle2, AlertCircle, Loader2, RefreshCw, ScanLine, CalendarClock, Trash2,
+  FileText, CheckCircle2, AlertCircle, Loader2, RefreshCw, ScanLine, CalendarClock, Trash2, ArrowRightCircle,
 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
@@ -73,6 +73,96 @@ function Importar() {
       return data ?? [];
     },
   });
+
+  // -- Pré-lançamento de Estoque Inicial a partir do mês anterior ---
+  const prevMes = periodo.mes === 1 ? 12 : periodo.mes - 1;
+  const prevAno = periodo.mes === 1 ? periodo.ano - 1 : periodo.ano;
+
+  const inicialAtualQ = useQuery({
+    queryKey: ["inv-inicial-atual", empresaId, periodo.mes, periodo.ano],
+    enabled: !!empresaId,
+    queryFn: async () => {
+      const inicio = `${periodo.ano}-${String(periodo.mes).padStart(2, "0")}-01`;
+      const lastDay = new Date(periodo.ano, periodo.mes, 0).getDate();
+      const fim = `${periodo.ano}-${String(periodo.mes).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
+      const { data } = await supabase
+        .from("inventario_snapshot")
+        .select("id")
+        .eq("empresa_id", empresaId!)
+        .eq("tipo", "inicial")
+        .gte("data_referencia", inicio)
+        .lte("data_referencia", fim)
+        .maybeSingle();
+      return data ?? null;
+    },
+  });
+
+  const finalAnteriorQ = useQuery({
+    queryKey: ["inv-final-anterior", empresaId, prevMes, prevAno],
+    enabled: !!empresaId,
+    queryFn: async () => {
+      const inicio = `${prevAno}-${String(prevMes).padStart(2, "0")}-01`;
+      const lastDay = new Date(prevAno, prevMes, 0).getDate();
+      const fim = `${prevAno}-${String(prevMes).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
+      const { data } = await supabase
+        .from("inventario_snapshot")
+        .select("id, total_valor, total_itens, data_referencia")
+        .eq("empresa_id", empresaId!)
+        .eq("tipo", "final")
+        .gte("data_referencia", inicio)
+        .lte("data_referencia", fim)
+        .order("data_referencia", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      return data ?? null;
+    },
+  });
+
+  const preLancarMut = useMutation({
+    mutationFn: async () => {
+      if (!empresaId) throw new Error("Empresa não selecionada");
+      const origem = finalAnteriorQ.data;
+      if (!origem) throw new Error("Nenhum estoque final no mês anterior");
+      const novaRef = `${periodo.ano}-${String(periodo.mes).padStart(2, "0")}-01`;
+
+      const { data: snap, error: sErr } = await supabase
+        .from("inventario_snapshot")
+        .upsert(
+          {
+            empresa_id: empresaId,
+            data_referencia: novaRef,
+            tipo: "inicial",
+            total_valor: origem.total_valor ?? 0,
+            total_itens: origem.total_itens ?? 0,
+          },
+          { onConflict: "empresa_id,data_referencia,tipo" },
+        )
+        .select()
+        .single();
+      if (sErr) throw sErr;
+
+      // Clona os itens
+      const { data: itensOrig, error: iErr } = await supabase
+        .from("inventario_itens")
+        .select("codigo, produto, unidade, quantidade, valor_unitario, valor_total")
+        .eq("snapshot_id", origem.id);
+      if (iErr) throw iErr;
+
+      await supabase.from("inventario_itens").delete().eq("snapshot_id", snap.id);
+      const itens = (itensOrig ?? []).map((i) => ({ ...i, snapshot_id: snap.id }));
+      if (itens.length) {
+        for (let i = 0; i < itens.length; i += 500) {
+          await supabase.from("inventario_itens").insert(itens.slice(i, i + 500));
+        }
+      }
+    },
+    onSuccess: () => {
+      qc.invalidateQueries();
+      toast.success("Estoque inicial pré-lançado a partir do mês anterior.");
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : "Erro ao pré-lançar"),
+  });
+
 
   // DRE existente (para preencher o formulário se já houver dados salvos).
   const dreExistenteQ = useQuery({
@@ -459,6 +549,41 @@ function Importar() {
           Período: {mesNome(periodo.mes)}/{periodo.ano} · Extração via scanner (sem IA) · Edite os valores antes de salvar.
         </p>
       </div>
+
+      {!inicialAtualQ.data && finalAnteriorQ.data && (
+        <Card className="border-primary/40 bg-primary/5">
+          <CardContent className="pt-6 flex items-start gap-3">
+            <ArrowRightCircle className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+            <div className="flex-1 space-y-2">
+              <div className="text-sm">
+                <span className="font-medium">Pré-lançamento sugerido:</span> usar o
+                estoque final de {mesNome(prevMes)}/{prevAno} (R${" "}
+                {Number(finalAnteriorQ.data.total_valor ?? 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {" · "}{finalAnteriorQ.data.total_itens ?? 0} itens) como
+                estoque inicial de {mesNome(periodo.mes)}/{periodo.ano}.
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  onClick={() => preLancarMut.mutate()}
+                  disabled={preLancarMut.isPending}
+                >
+                  {preLancarMut.isPending ? "Pré-lançando..." : "Confirmar pré-lançamento"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => qc.setQueryData(["inv-final-anterior", empresaId, prevMes, prevAno], null)}
+                >
+                  Descartar sugestão
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {TIPOS.map((t) => {

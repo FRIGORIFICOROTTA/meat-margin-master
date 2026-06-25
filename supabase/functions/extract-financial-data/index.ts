@@ -197,9 +197,7 @@ function parseDRE(text: string): DreParsed {
   // ---------------------------------------------------------------
   // Despesas detalhadas
   // ---------------------------------------------------------------
-  // Recorta região: após §PLANO§ (ou primeira menção a "Despesas <valor> <%>")
-  // até "Resultado bruto" (resumo final) ou "Total de despesas".
-  const despesas: DreParsed["despesas"] = [];
+  const despesasRaw: Array<{ label: string; valor: number; pct: number | null }> = [];
 
   let regionStart = norm.indexOf("§PLANO§");
   if (regionStart === -1) {
@@ -220,14 +218,46 @@ function parseDRE(text: string): DreParsed {
       const valor = parseBR(mt[2]);
       if (valor === null || valor === 0) continue;
       const pct = parseBR(mt[3]);
-      despesas.push({
-        categoria: categorize(label),
-        subcategoria: label,
-        valor: Math.abs(valor),
-        percentual_venda: pct !== null ? pct / 100 : (total_vendas ? Math.abs(valor) / total_vendas : null),
-      });
+      despesasRaw.push({ label, valor: Math.abs(valor), pct });
     }
   }
+
+  // -- Remove duplicidade categoria/subcategoria --------------------
+  // PDFs trazem linhas-resumo de categoria seguidas das subcategorias
+  // que somam o mesmo valor. Comparamos cada linha com a soma das
+  // linhas seguintes; se bater (tolerância 1% ou R$1), descartamos.
+  const HEADER_LABELS = /^(despesas?(\s+(operacionais?|com\s+pessoal|administrativ\w*|financeir\w*|com\s+vendas?|gerais?|tribut\w*))?|tributos?|outras\s+despesas?|pessoal|encargos|impostos?\s+e\s+taxas?)\s*$/i;
+  const usados = new Array(despesasRaw.length).fill(true);
+  for (let i = 0; i < despesasRaw.length; i++) {
+    if (!usados[i]) continue;
+    const cur = despesasRaw[i];
+    let soma = 0;
+    let k = 0;
+    for (let j = i + 1; j < despesasRaw.length; j++) {
+      if (!usados[j]) continue;
+      soma += despesasRaw[j].valor;
+      k++;
+      const tol = Math.max(1, cur.valor * 0.01);
+      if (Math.abs(soma - cur.valor) <= tol && k >= 2) {
+        usados[i] = false;
+        break;
+      }
+      if (soma > cur.valor + tol) break;
+    }
+    if (usados[i] && HEADER_LABELS.test(cur.label) && i + 1 < despesasRaw.length) {
+      const prox = despesasRaw.slice(i + 1).filter((_, idx) => usados[i + 1 + idx]);
+      if (prox.length && prox.some((p) => p.valor < cur.valor)) usados[i] = false;
+    }
+  }
+
+  const despesas: DreParsed["despesas"] = despesasRaw
+    .filter((_, i) => usados[i])
+    .map((d) => ({
+      categoria: categorize(d.label),
+      subcategoria: d.label,
+      valor: d.valor,
+      percentual_venda: d.pct !== null ? d.pct / 100 : (total_vendas ? d.valor / total_vendas : null),
+    }));
 
   // ---------------------------------------------------------------
   // Período: "De: 01/05/2026 até: 31/05/2026" ou "MM/AAAA"

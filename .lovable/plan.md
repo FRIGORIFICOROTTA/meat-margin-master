@@ -1,53 +1,32 @@
-## Diagnóstico
+## Plano: ajustes na importação
 
-Comparando o esperado com o atual no parser de estoque:
+### 1. Resultado líquido sem variação de estoque
+Confirmado pelo usuário — manter o cálculo atual. Sem alterações de código.
 
-| Arquivo | Itens esperados | Valor esperado | Detectado hoje | Diferença |
-|---|---|---|---|---|
-| Maio (final) | 313 | 58.594,72 | **313 / 58.594,72** ✅ | 0 |
-| Abril (inicial) | 318 | 69.203,23 | **317 / 69.140,39** | -1 item / -62,84 |
+### 2. Pré-lançamento do Estoque Inicial a partir do Estoque Final do mês anterior
+Quando o usuário abrir `/importar` em um mês que ainda não tem `estoque_inicial`, buscar automaticamente o `estoque_final` do mês imediatamente anterior (mesma empresa) e usá-lo como pré-lançamento.
 
-Ou seja: **maio está 100% correto**. O problema é só no abril — o parser está deixando 1 item de fora cujo `valor_total` é R$ 62,84.
+Comportamento:
+- Só pré-popula se **não existir** snapshot `inicial` no mês corrente (não sobrescreve dados reais).
+- Mostra um banner discreto: "Estoque inicial pré-lançado a partir do estoque final de {mês anterior} — confirme ou edite". Botão "Confirmar" persiste como snapshot `inicial` do mês corrente (copiando total e itens). Botão "Descartar" remove a sugestão e permite upload normal.
+- Não cria `arquivos_importados` falso — o snapshot fica marcado com origem `derivado_mes_anterior` (novo valor em campo `observacao`/metadata existente, sem mudança de schema; gravamos no `config` da DRE ou em um campo texto já disponível).
+- Implementação: nova query `estoqueFinalAnteriorQ` em `importar.tsx`; ação `confirmarPreLancamentoEstoque` que insere em `inventario_snapshot` + `inventario_itens` clonando o anterior.
 
-### Causa provável (a confirmar com log)
+### 3. Duplicidade de despesas (categorias somando subcategorias)
+**Diagnóstico:** o PDF de DRE traz, no plano de contas, **linhas-resumo de categoria** (ex: "Despesas com Pessoal  12.345,67  3,12") seguidas das **subcategorias** que compõem aquela categoria (Salários, Encargos, etc.). O parser atual (`parseDRE`, regex `tripleRe`) captura **as duas**, então a soma de `despesas_detalhe` dobra: paga categoria + soma das subcategorias.
 
-O parser tem 3 pontos onde um item legítimo pode ser descartado:
+**Correção no `supabase/functions/extract-financial-data/index.ts`:**
+- Detectar linhas-resumo de categoria e descartar, mantendo apenas as folhas (subcategorias).
+- Estratégia: após capturar todas as triplas, agrupar por nome candidato a categoria; se o valor de uma linha for **≈ soma das linhas seguintes** dentro de uma janela (tolerância 1%), marcar como cabeçalho e excluí-la.
+- Reforço por rótulo: lista de nomes conhecidos de cabeçalho ("Despesas Operacionais", "Despesas com Pessoal", "Despesas Administrativas", "Despesas Financeiras", "Despesas com Vendas", "Tributos", "Outras Despesas") — quando o nome bate e existe pelo menos uma subcategoria abaixo, descartar.
+- Validar com o PDF real (já temos o de Maio/Formosa) via `code--execute_preview_javascript` antes de finalizar: a soma de `despesas_detalhe` deve bater com `total_despesas` extraído.
 
-1. **Âncora regex** (`UNIDADE seguida de 3 números`) — exige `\b` antes da unidade. Itens cuja descrição termine colada na unidade (ex.: `...750ML UN01UN UNID 1,00 ...` — note o `UN01UN` na imagem) podem confundir o lookbehind e fazer o regex casar com `UN` em vez de `UNID`, "comendo" o item anterior.
-2. **Dedup key** = `codigo|valor_total|quantidade`. Se dois itens distintos têm mesmo código (caso raro mas possível em SKU repetido) **ou** se um item aparece com código `null`, a chave colide e o segundo é jogado fora.
-3. **Captura código+descrição**: pega o ÚLTIMO `dígito + letra` da janela. Quando a descrição do item *anterior* termina em número (ex.: `500G`, `750ML`, `200G`), esse número pode ser interpretado como "código" do item *seguinte*, deixando o item anterior sem código e fazendo o atual perder a descrição correta.
+**Migração de dados existentes:** botão **"Reprocessar"** já existente em `/importar` resolve para os arquivos do usuário (limpa `despesas_detalhe` e recria). Não há migração SQL.
 
-O valor 62,84 não bate com nenhum item visível nas últimas linhas do PDF, então o item perdido está no meio do relatório.
+### Ordem de execução
+1. Fix do parser de despesas (#3) — maior impacto, valida com PDF real.
+2. Pré-lançamento de estoque (#2) — nova UI + ação no `importar.tsx`.
 
-## Plano de correção
-
-### 1. Instrumentar para localizar o item perdido (1 deploy)
-
-Em `supabase/functions/extract-financial-data/index.ts`, adicionar log SEMPRE (não só quando zero):
-- Total de âncoras (`anchorRe`) encontradas vs itens aceitos.
-- Lista dos descartes com motivo: `"qtd/vu/vt null"`, `"window vazia"`, `"produto < 2 chars"`, `"dedup key colidiu (key=...)"`.
-- Soma calculada vs `totalReportado` e a diferença.
-
-Pedir ao usuário para clicar em **"Forçar reprocessar"** no arquivo de abril e ler o log da função.
-
-### 2. Corrigir a(s) causa(s) identificada(s)
-
-Dependendo do log, aplicar uma ou mais:
-
-- **Dedup mais robusto**: trocar a chave por `${codigo}|${produto}|${vt}` (inclui descrição) — colisões só acontecem se for genuinamente o mesmo item.
-- **Âncora resiliente a `UN01UN`**: exigir que o caractere *anterior* à unidade não seja letra/dígito, e dar prioridade à unidade mais longa (`UNID` antes de `UN`) ordenando o regex `UNID|KG|PCT|PC|CX|LT|MT|DZ|GR|ML|UN|G|L` — já está nessa ordem, mas o `|` em regex é guloso da esquerda, então OK. O ajuste real é mudar `\b(${UNI})\b` para `(?<![A-Za-z0-9])(${UNI})(?=\\s)`.
-- **Detecção de código melhor**: aceitar como código apenas se a janela começar com `^\d{1,8}\s+[A-Za-zÀ-ÿ]` (não pegar dígitos no meio), e se não houver, deixar `codigo=null` mas ainda **manter o item** (o dedup acima já protege).
-
-### 3. Validar
-
-- Reprocessar abril → esperar **318 itens / 69.203,23**.
-- Reprocessar maio → continuar **313 / 58.594,72** (não regredir).
-- Mostrar no chat o diff antes/depois.
-
-### 4. UX (opcional, baixo custo)
-
-Na tela `/estoque`, exibir um aviso amarelo quando `itens.length` ≠ `total_itens reportado pelo PDF` ou quando `soma(itens) ≠ total_valor reportado`, para o usuário detectar discrepâncias futuras sem precisar abrir a função.
-
-## Entregável
-
-Um único deploy da edge function `extract-financial-data` com diagnóstico + correção, validado contra os dois PDFs reais.
+### Fora do escopo
+- Não mexer no cálculo de resultado líquido (#1 mantém-se).
+- Sem alterações de schema.
