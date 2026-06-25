@@ -224,12 +224,13 @@ function DrePage() {
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-3 gap-4 text-sm">
-              <Comp label="Gerencial" valor={Number(dre.resultado_liquido_gerencial)} />
+              <Comp label="Gerencial" valor={Number(dre.resultado_bruto) - Number(dre.variacao_estoque) - Number(dre.total_despesas)} />
               <Comp label="Fiscal" valor={fiscal.resultado_liquido_fiscal} />
               <Comp
                 label="Diferença"
-                valor={fiscal.resultado_liquido_fiscal - Number(dre.resultado_liquido_gerencial)}
+                valor={fiscal.resultado_liquido_fiscal - (Number(dre.resultado_bruto) - Number(dre.variacao_estoque) - Number(dre.total_despesas))}
               />
+
             </div>
           </CardContent>
         </Card>
