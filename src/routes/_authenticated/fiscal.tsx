@@ -19,7 +19,7 @@ import {
   type TipoLancamentoFiscal,
 } from "@/lib/fiscal";
 import { toast } from "sonner";
-import { Plus, Trash2, Save } from "lucide-react";
+import { Plus, Trash2, Save, Info, ChevronDown } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/fiscal")({
   component: FiscalPage,
@@ -195,6 +195,22 @@ function FiscalPage() {
     const est = estimativas[r.tipo] ?? 0;
     setRow(idx, { valor_real: Number(est.toFixed(2)) });
   }
+  function removeRow(idx: number) {
+    const r = rows[idx];
+    if (r.id) {
+      if (!confirm("Excluir este lançamento salvo? Esta ação não pode ser desfeita.")) return;
+      deleteMut.mutate(r.id);
+    }
+    setRows((rs) => rs.filter((_, i) => i !== idx));
+  }
+  function limparTributo(idx: number) {
+    const r = rows[idx];
+    if (r.id) {
+      if (!confirm("Limpar este tributo? O lançamento salvo será removido.")) return;
+      deleteMut.mutate(r.id);
+    }
+    setRow(idx, { id: undefined, valor_real: 0, data_pagamento: null, observacao: null });
+  }
 
   if (!empresaId) return <p className="text-muted-foreground">Selecione uma empresa.</p>;
   if (ctx.isLoading) return <p className="text-muted-foreground">Carregando...</p>;
@@ -218,6 +234,9 @@ function FiscalPage() {
           {ctx.data?.empresa?.nome} · {mesNome(periodo.mes)}/{periodo.ano} · {REGIME_LABEL[regime]}
         </p>
       </div>
+
+      <HelpCard />
+
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <Stat label="Total Estimado" valor={totalEst} />
@@ -317,18 +336,31 @@ function FiscalPage() {
                             =
                           </Button>
                         )}
-                        <Button size="sm" onClick={() => saveMut.mutate(r)} disabled={saveMut.isPending}>
+                        <Button size="sm" onClick={() => saveMut.mutate(r)} disabled={saveMut.isPending} title="Salvar">
                           <Save className="h-4 w-4" />
                         </Button>
-                        {r.id && (
+                        {isOutro ? (
                           <Button
                             size="sm"
                             variant="destructive"
-                            onClick={() => deleteMut.mutate(r.id!)}
+                            onClick={() => removeRow(i)}
                             disabled={deleteMut.isPending}
+                            title="Excluir ajuste"
                           >
                             <Trash2 className="h-4 w-4" />
                           </Button>
+                        ) : (
+                          r.id && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => limparTributo(i)}
+                              disabled={deleteMut.isPending}
+                              title="Limpar valor lançado"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          )
                         )}
                       </div>
                     </td>
@@ -340,13 +372,117 @@ function FiscalPage() {
         </CardContent>
       </Card>
 
-      <p className="text-xs text-muted-foreground">
-        Dica: clique em <strong>=</strong> para copiar o valor estimado, ajuste se preciso e salve. Os valores reais
-        passam a alimentar a DRE Fiscal (modo <strong>Real</strong>).
-      </p>
     </div>
   );
 }
+
+function HelpCard() {
+  const [open, setOpen] = useState<boolean>(() => {
+    if (typeof window === "undefined") return true;
+    const v = window.localStorage.getItem("fiscal-help-open");
+    return v === null ? true : v === "1";
+  });
+  function toggle() {
+    setOpen((o) => {
+      const next = !o;
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem("fiscal-help-open", next ? "1" : "0");
+      }
+      return next;
+    });
+  }
+  return (
+    <Card className="border-primary/30 bg-primary/5">
+      <button
+        type="button"
+        onClick={toggle}
+        className="w-full flex items-center justify-between p-4 text-left"
+      >
+        <div className="flex items-center gap-2">
+          <Info className="h-4 w-4 text-primary" />
+          <span className="font-medium text-sm">Como preencher esta tela</span>
+        </div>
+        <ChevronDown className={cn("h-4 w-4 transition-transform", open && "rotate-180")} />
+      </button>
+      {open && (
+        <div className="px-4 pb-4 text-sm space-y-3 text-muted-foreground">
+          <section>
+            <p className="font-medium text-foreground">Para que serve</p>
+            <p>
+              Registrar o valor <strong>real</strong> dos impostos pagos no mês, para que a DRE Fiscal mostre o
+              resultado verdadeiro — e não apenas uma estimativa.
+            </p>
+          </section>
+
+          <section>
+            <p className="font-medium text-foreground">De onde vem a coluna “Estimado”</p>
+            <p>
+              É um cálculo automático com base no regime tributário da empresa (Simples / Presumido / Real), aplicado
+              sobre a Receita ou o Lucro do período. Serve só como referência: quem manda é o <strong>Valor Real</strong>.
+            </p>
+          </section>
+
+          <section>
+            <p className="font-medium text-foreground">Como lançar cada tributo (passo a passo)</p>
+            <ol className="list-decimal pl-5 space-y-1">
+              <li>Pegue a guia paga no mês (DAS, DARF, GNRE etc.).</li>
+              <li>
+                Digite o valor pago em <strong>Valor Real</strong>. Para começar a partir da estimativa, clique no
+                botão <strong>=</strong>.
+              </li>
+              <li>Opcional: informe a data de pagamento e uma observação (nº da guia, parcelamento, etc.).</li>
+              <li>
+                Clique em <strong>Salvar</strong> (ícone de disquete).
+              </li>
+            </ol>
+            <p className="mt-1">
+              Se um tributo não foi devido no mês, deixe o Valor Real em <strong>0</strong> e salve — ou use o botão
+              de lixeira ao lado para limpar um lançamento salvo.
+            </p>
+          </section>
+
+          <section>
+            <p className="font-medium text-foreground">Ajustes / Outros</p>
+            <p>
+              Use <strong>Adicionar ajuste/outro</strong> para itens fora do regime: retenções (INSS, IRRF, ISS),
+              créditos tributários, multas, parcelamentos. Escolha o sinal:
+            </p>
+            <ul className="list-disc pl-5 space-y-1">
+              <li>
+                <strong>Despesa (+)</strong>: soma aos tributos e reduz o lucro.
+              </li>
+              <li>
+                <strong>Crédito (−)</strong>: abate dos tributos e aumenta o lucro.
+              </li>
+            </ul>
+            <p>Cada ajuste pode ser excluído pela lixeira da própria linha.</p>
+          </section>
+
+          <section>
+            <p className="font-medium text-foreground">Coluna “Diferença”</p>
+            <p>
+              Mostra <code>Real − Estimado</code>. <span className="text-destructive">Vermelho</span> = pagou mais
+              que o estimado; <span className="text-success">verde</span> = pagou menos. Serve de alerta para revisar.
+            </p>
+          </section>
+
+          <section>
+            <p className="font-medium text-foreground">Impacto na DRE</p>
+            <p>
+              No modo <strong>Fiscal Real</strong>, a DRE usa exatamente os valores lançados aqui. No modo
+              <strong> Fiscal Estimado</strong>, continua usando o cálculo automático do regime.
+            </p>
+            <p>
+              A diferença entre <strong>Gerencial</strong> e <strong>Fiscal</strong> corresponde apenas aos tributos
+              — a base operacional (Receita − CMV − Variação de Estoque − Despesas) é a mesma nas duas visões.
+            </p>
+          </section>
+        </div>
+      )}
+    </Card>
+  );
+}
+
 
 function Stat({ label, valor, accent, sign }: { label: string; valor: number; accent?: boolean; sign?: boolean }) {
   return (
