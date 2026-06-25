@@ -227,6 +227,115 @@ function Importar() {
     onError: (e) => toast.error(e instanceof Error ? e.message : "Erro na extração"),
   });
 
+  const moveMut = useMutation({
+    mutationFn: async ({ arquivo_id, mes, ano }: { arquivo_id: string; mes: number; ano: number }) => {
+      if (!empresaId) throw new Error("Empresa não selecionada");
+      const { data: arq, error: arqErr } = await supabase
+        .from("arquivos_importados")
+        .select("*")
+        .eq("id", arquivo_id)
+        .single();
+      if (arqErr) throw arqErr;
+      if (arq.mes === mes && arq.ano === ano) {
+        throw new Error("Já está nesse período");
+      }
+      // Se houver DRE vinculada, valida conflito no destino
+      if (arq.dre_id) {
+        const { data: conflito } = await supabase
+          .from("dre_mensal")
+          .select("id")
+          .eq("empresa_id", empresaId)
+          .eq("mes", mes)
+          .eq("ano", ano)
+          .is("deleted_at", null)
+          .neq("id", arq.dre_id)
+          .maybeSingle();
+        if (conflito) {
+          throw new Error("Já existe DRE no período de destino. Exclua-a antes de mover.");
+        }
+        const { error: dreErr } = await supabase
+          .from("dre_mensal")
+          .update({ mes, ano })
+          .eq("id", arq.dre_id);
+        if (dreErr) throw dreErr;
+      }
+      // Se houver snapshot, desloca data_referencia em meses
+      if (arq.snapshot_id) {
+        const { data: snap } = await supabase
+          .from("inventario_snapshot")
+          .select("data_referencia, tipo")
+          .eq("id", arq.snapshot_id)
+          .single();
+        if (snap) {
+          const d = new Date(snap.data_referencia + "T00:00:00");
+          const novaData = new Date(ano, mes - 1, d.getDate());
+          const novaRef = `${novaData.getFullYear()}-${String(novaData.getMonth() + 1).padStart(2, "0")}-${String(novaData.getDate()).padStart(2, "0")}`;
+          const { data: confSnap } = await supabase
+            .from("inventario_snapshot")
+            .select("id")
+            .eq("empresa_id", empresaId)
+            .eq("data_referencia", novaRef)
+            .eq("tipo", snap.tipo)
+            .neq("id", arq.snapshot_id)
+            .maybeSingle();
+          if (confSnap) {
+            throw new Error("Já existe inventário desse tipo na data de destino.");
+          }
+          const { error: sErr } = await supabase
+            .from("inventario_snapshot")
+            .update({ data_referencia: novaRef })
+            .eq("id", arq.snapshot_id);
+          if (sErr) throw sErr;
+        }
+      }
+      const { error: updErr } = await supabase
+        .from("arquivos_importados")
+        .update({ mes, ano })
+        .eq("id", arquivo_id);
+      if (updErr) throw updErr;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries();
+      toast.success("Arquivo movido. Troque o período no topo para vê-lo.");
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : "Erro ao mover"),
+  });
+
+  const deleteMut = useMutation({
+    mutationFn: async ({ arquivo_id, cascade }: { arquivo_id: string; cascade: boolean }) => {
+      const { data: arq, error: arqErr } = await supabase
+        .from("arquivos_importados")
+        .select("*")
+        .eq("id", arquivo_id)
+        .single();
+      if (arqErr) throw arqErr;
+
+      if (cascade && arq.dre_id) {
+        await supabase.from("despesas_detalhe").delete().eq("dre_id", arq.dre_id);
+        await supabase.from("dre_mensal").delete().eq("id", arq.dre_id);
+      }
+      if (cascade && arq.snapshot_id) {
+        await supabase.from("inventario_itens").delete().eq("snapshot_id", arq.snapshot_id);
+        await supabase.from("inventario_snapshot").delete().eq("id", arq.snapshot_id);
+      }
+      if (arq.storage_path) {
+        await supabase.storage.from("financial-pdfs").remove([arq.storage_path]);
+      }
+      const { error: delErr } = await supabase
+        .from("arquivos_importados")
+        .delete()
+        .eq("id", arquivo_id);
+      if (delErr) throw delErr;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries();
+      setFormInit(false);
+      toast.success("Importação excluída.");
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : "Erro ao excluir"),
+  });
+
+
   const confirmMut = useMutation({
     mutationFn: async () => {
       if (!empresaId) throw new Error("Empresa não selecionada");
