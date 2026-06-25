@@ -24,6 +24,9 @@ function DrePage() {
   const [empresaId] = useEmpresaSelecionada();
   const [periodo] = usePeriodo();
   const [modo, setModo] = useState<"gerencial" | "fiscal">("gerencial");
+  const [editing, setEditing] = useState(false);
+  const qc = useQueryClient();
+
 
   const dreQ = useQuery({
     queryKey: ["dre-full", empresaId, periodo.mes, periodo.ano],
