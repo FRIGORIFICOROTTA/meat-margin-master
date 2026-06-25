@@ -587,3 +587,97 @@ function StatusBadge({ status }: { status: StatusArquivo }) {
   const cur = map[status];
   return <Badge variant={cur.variant} className="gap-1">{cur.icon}{cur.label}</Badge>;
 }
+
+function MovePeriodoButton({
+  arquivoId, mesAtual, anoAtual, onMove, disabled,
+}: { arquivoId: string; mesAtual: number; anoAtual: number; onMove: (mes: number, ano: number) => void; disabled?: boolean }) {
+  const [open, setOpen] = useState(false);
+  const [mes, setMes] = useState(mesAtual);
+  const [ano, setAno] = useState(anoAtual);
+  const meses = Array.from({ length: 12 }, (_, i) => i + 1);
+  const anos = Array.from({ length: 6 }, (_, i) => new Date().getFullYear() - 3 + i);
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button size="sm" variant="outline" disabled={disabled}>
+          <CalendarClock className="h-3 w-3 mr-1" />Mover período
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-64 space-y-3" align="end">
+        <div className="text-sm font-medium">Mover para</div>
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <Label className="text-xs">Mês</Label>
+            <Select value={String(mes)} onValueChange={(v) => setMes(Number(v))}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {meses.map((m) => (
+                  <SelectItem key={m} value={String(m)}>{mesNome(m)}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label className="text-xs">Ano</Label>
+            <Select value={String(ano)} onValueChange={(v) => setAno(Number(v))}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {anos.map((a) => (
+                  <SelectItem key={a} value={String(a)}>{a}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <Button
+          size="sm"
+          className="w-full"
+          disabled={disabled || (mes === mesAtual && ano === anoAtual)}
+          onClick={() => { onMove(mes, ano); setOpen(false); }}
+        >
+          Confirmar
+        </Button>
+        <input type="hidden" value={arquivoId} />
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function DeleteButton({
+  hasLinks, onDelete, disabled,
+}: { hasLinks: boolean; onDelete: (cascade: boolean) => void; disabled?: boolean }) {
+  const [cascade, setCascade] = useState(true);
+  return (
+    <AlertDialog>
+      <AlertDialogTrigger asChild>
+        <Button size="sm" variant="outline" disabled={disabled} className="text-destructive hover:text-destructive">
+          <Trash2 className="h-3 w-3 mr-1" />Excluir
+        </Button>
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Excluir esta importação?</AlertDialogTitle>
+          <AlertDialogDescription>
+            Remove o registro do arquivo e o PDF do storage.
+            {hasLinks && " Este arquivo tem dados vinculados (DRE ou inventário)."}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        {hasLinks && (
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={cascade}
+              onChange={(e) => setCascade(e.target.checked)}
+            />
+            Apagar também a DRE e/ou inventário vinculados
+          </label>
+        )}
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancelar</AlertDialogCancel>
+          <AlertDialogAction onClick={() => onDelete(cascade)}>Excluir</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
