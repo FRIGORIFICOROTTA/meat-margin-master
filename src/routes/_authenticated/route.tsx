@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/select";
 import { MESES } from "@/lib/finance";
 import { Toaster } from "sonner";
-import { LayoutDashboard, Upload, FileBarChart2, Boxes, Settings, LogOut, Receipt } from "lucide-react";
+import { LayoutDashboard, Upload, FileBarChart2, Boxes, Settings, LogOut, Receipt, Landmark } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated")({
   ssr: false,
