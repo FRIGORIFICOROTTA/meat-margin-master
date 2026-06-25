@@ -247,7 +247,9 @@ export function calcularDREFiscalReal(
   }
 
   const receita_liquida = estimado.receita_bruta - estimado.devolucoes - impostos_oper_total;
-  const cmv_ajustado = dre.cmv;
+  const cmv = dre.cmv;
+  const variacao_estoque = dre.variacao_estoque;
+  const cmv_ajustado = cmv - variacao_estoque;
   const lucro_bruto = receita_liquida - cmv_ajustado;
   const despesas_operacionais = dre.total_despesas;
   const lucro_antes_ir = lucro_bruto - despesas_operacionais;
@@ -264,6 +266,8 @@ export function calcularDREFiscalReal(
     impostos_total: impostos_oper_total,
     impostos_breakdown,
     receita_liquida,
+    cmv,
+    variacao_estoque,
     cmv_ajustado,
     lucro_bruto,
     despesas_operacionais,
@@ -277,6 +281,7 @@ export function calcularDREFiscalReal(
     total_estimado_referencia: estimado.impostos_total + estimado.irpj + estimado.csll,
   };
 }
+
 
 export const TRIBUTO_LABEL = LABEL_TRIBUTO;
 
