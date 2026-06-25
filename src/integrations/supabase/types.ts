@@ -403,6 +403,71 @@ export type Database = {
           },
         ]
       }
+      lancamentos_fiscais: {
+        Row: {
+          ano: number
+          arquivo_path: string | null
+          created_at: string
+          created_by: string | null
+          data_pagamento: string | null
+          deleted_at: string | null
+          empresa_id: string
+          id: string
+          label: string | null
+          mes: number
+          observacao: string | null
+          sinal: number
+          tipo: string
+          updated_at: string
+          valor_estimado: number | null
+          valor_real: number
+        }
+        Insert: {
+          ano: number
+          arquivo_path?: string | null
+          created_at?: string
+          created_by?: string | null
+          data_pagamento?: string | null
+          deleted_at?: string | null
+          empresa_id: string
+          id?: string
+          label?: string | null
+          mes: number
+          observacao?: string | null
+          sinal?: number
+          tipo: string
+          updated_at?: string
+          valor_estimado?: number | null
+          valor_real?: number
+        }
+        Update: {
+          ano?: number
+          arquivo_path?: string | null
+          created_at?: string
+          created_by?: string | null
+          data_pagamento?: string | null
+          deleted_at?: string | null
+          empresa_id?: string
+          id?: string
+          label?: string | null
+          mes?: number
+          observacao?: string | null
+          sinal?: number
+          tipo?: string
+          updated_at?: string
+          valor_estimado?: number | null
+          valor_real?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "lancamentos_fiscais_empresa_id_fkey"
+            columns: ["empresa_id"]
+            isOneToOne: false
+            referencedRelation: "empresas"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       usuarios_empresas: {
         Row: {
           created_at: string
