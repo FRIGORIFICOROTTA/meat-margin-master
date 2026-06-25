@@ -19,7 +19,7 @@ import {
   type TipoLancamentoFiscal,
 } from "@/lib/fiscal";
 import { toast } from "sonner";
-import { Plus, Trash2, Save } from "lucide-react";
+import { Plus, Trash2, Save, Info, ChevronDown } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/fiscal")({
   component: FiscalPage,
