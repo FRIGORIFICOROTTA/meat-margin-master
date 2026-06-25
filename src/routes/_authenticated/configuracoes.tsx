@@ -12,6 +12,7 @@ import { toast } from "sonner";
 import { useSession } from "@/lib/use-session";
 import { z } from "zod";
 import { Plus, Trash2 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 
 export const Route = createFileRoute("/_authenticated/configuracoes")({
   component: ConfigPage,
@@ -69,6 +70,7 @@ function ConfigPage() {
           cidade: parsed.data.cidade || null,
           uf: parsed.data.uf || null,
           regime_tributario: parsed.data.regime,
+          tipo: "filial",
         })
         .select()
         .single();
@@ -85,17 +87,21 @@ function ConfigPage() {
   });
 
   const deleteMut = useMutation({
-    mutationFn: async (id: string) => {
+    mutationFn: async (emp: { id: string; tipo: string }) => {
+      if (emp.tipo === "matriz") {
+        throw new Error("A matriz não pode ser removida. Edite os dados ou contate o suporte.");
+      }
       const { error } = await supabase
         .from("empresas")
         .update({ deleted_at: new Date().toISOString() })
-        .eq("id", id);
+        .eq("id", emp.id);
       if (error) throw error;
     },
     onSuccess: () => {
       qc.invalidateQueries();
       toast.success("Empresa removida");
     },
+    onError: (e) => toast.error(e instanceof Error ? e.message : "Erro"),
   });
 
   const updRegime = useMutation({
@@ -162,6 +168,7 @@ function ConfigPage() {
             <thead>
               <tr className="border-b text-xs uppercase text-muted-foreground">
                 <th className="text-left p-3">Nome</th>
+                <th className="text-left p-3">Tipo</th>
                 <th className="text-left p-3">CNPJ</th>
                 <th className="text-left p-3">Cidade/UF</th>
                 <th className="text-left p-3">Regime DRE</th>
@@ -172,6 +179,13 @@ function ConfigPage() {
               {(empresasQ.data ?? []).map((e) => (
                 <tr key={e.id} className="border-b">
                   <td className="p-3 font-medium">{e.nome}</td>
+                  <td className="p-3">
+                    {e.tipo === "matriz" ? (
+                      <Badge className="bg-primary text-primary-foreground">Matriz</Badge>
+                    ) : (
+                      <Badge variant="secondary">Filial</Badge>
+                    )}
+                  </td>
                   <td className="p-3 text-muted-foreground">{e.cnpj ?? "—"}</td>
                   <td className="p-3 text-muted-foreground">{[e.cidade, e.uf].filter(Boolean).join("/") || "—"}</td>
                   <td className="p-3">
@@ -190,8 +204,10 @@ function ConfigPage() {
                     <Button
                       variant="ghost"
                       size="icon"
+                      disabled={e.tipo === "matriz"}
+                      title={e.tipo === "matriz" ? "A matriz não pode ser removida" : "Remover"}
                       onClick={() => {
-                        if (confirm(`Remover "${e.nome}"?`)) deleteMut.mutate(e.id);
+                        if (confirm(`Remover "${e.nome}"?`)) deleteMut.mutate({ id: e.id, tipo: e.tipo });
                       }}
                     >
                       <Trash2 className="h-4 w-4 text-destructive" />
