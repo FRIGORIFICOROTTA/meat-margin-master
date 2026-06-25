@@ -105,10 +105,11 @@ export function calcularDREFiscal(
   }
 
   const receita_liquida = base - impostos_total;
-  // CMV do PDF já reflete o custo das mercadorias vendidas no período;
-  // a variação de estoque é mostrada separadamente como ajuste informativo,
-  // não somada novamente ao CMV (evita dupla contagem).
-  const cmv_ajustado = dre.cmv;
+  // CMV Ajustado = CMV do ERP - Variação de Estoque (Estoque Final - Estoque Inicial).
+  // Variação negativa (estoque caiu) aumenta o custo real do período.
+  const cmv = dre.cmv;
+  const variacao_estoque = dre.variacao_estoque;
+  const cmv_ajustado = cmv - variacao_estoque;
   const lucro_bruto = receita_liquida - cmv_ajustado;
   const despesas_operacionais = dre.total_despesas;
   const lucro_antes_ir = lucro_bruto - despesas_operacionais;
@@ -134,6 +135,8 @@ export function calcularDREFiscal(
     impostos_total,
     impostos_breakdown,
     receita_liquida,
+    cmv,
+    variacao_estoque,
     cmv_ajustado,
     lucro_bruto,
     despesas_operacionais,
@@ -143,6 +146,7 @@ export function calcularDREFiscal(
     resultado_liquido_fiscal,
   };
 }
+
 
 // ---------------- DRE Fiscal REAL (com lançamentos efetivos) ----------------
 
