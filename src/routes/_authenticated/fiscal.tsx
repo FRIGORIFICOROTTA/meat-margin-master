@@ -195,6 +195,22 @@ function FiscalPage() {
     const est = estimativas[r.tipo] ?? 0;
     setRow(idx, { valor_real: Number(est.toFixed(2)) });
   }
+  function removeRow(idx: number) {
+    const r = rows[idx];
+    if (r.id) {
+      if (!confirm("Excluir este lançamento salvo? Esta ação não pode ser desfeita.")) return;
+      deleteMut.mutate(r.id);
+    }
+    setRows((rs) => rs.filter((_, i) => i !== idx));
+  }
+  function limparTributo(idx: number) {
+    const r = rows[idx];
+    if (r.id) {
+      if (!confirm("Limpar este tributo? O lançamento salvo será removido.")) return;
+      deleteMut.mutate(r.id);
+    }
+    setRow(idx, { id: undefined, valor_real: 0, data_pagamento: null, observacao: null });
+  }
 
   if (!empresaId) return <p className="text-muted-foreground">Selecione uma empresa.</p>;
   if (ctx.isLoading) return <p className="text-muted-foreground">Carregando...</p>;
