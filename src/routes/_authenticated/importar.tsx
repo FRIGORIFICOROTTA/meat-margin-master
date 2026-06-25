@@ -550,6 +550,41 @@ function Importar() {
         </p>
       </div>
 
+      {!inicialAtualQ.data && finalAnteriorQ.data && (
+        <Card className="border-primary/40 bg-primary/5">
+          <CardContent className="pt-6 flex items-start gap-3">
+            <ArrowRightCircle className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+            <div className="flex-1 space-y-2">
+              <div className="text-sm">
+                <span className="font-medium">Pré-lançamento sugerido:</span> usar o
+                estoque final de {mesNome(prevMes)}/{prevAno} (R${" "}
+                {Number(finalAnteriorQ.data.total_valor ?? 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {" · "}{finalAnteriorQ.data.total_itens ?? 0} itens) como
+                estoque inicial de {mesNome(periodo.mes)}/{periodo.ano}.
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  onClick={() => preLancarMut.mutate()}
+                  disabled={preLancarMut.isPending}
+                >
+                  {preLancarMut.isPending ? "Pré-lançando..." : "Confirmar pré-lançamento"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => qc.setQueryData(["inv-final-anterior", empresaId, prevMes, prevAno], null)}
+                >
+                  Descartar sugestão
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+
+
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {TIPOS.map((t) => {
           const arq = arquivoPorTipo(t.key);
