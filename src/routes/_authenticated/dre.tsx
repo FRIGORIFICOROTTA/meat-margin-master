@@ -99,8 +99,8 @@ function DrePage() {
     { label: "(-) Total Despesas", valor: -Number(dre.total_despesas), pct: pct(-Number(dre.total_despesas)) },
     {
       label: "= Resultado Líquido Gerencial",
-      valor: Number(dre.resultado_liquido_gerencial),
-      pct: pct(Number(dre.resultado_liquido_gerencial)),
+      valor: Number(dre.resultado_bruto) - Number(dre.variacao_estoque) - Number(dre.total_despesas),
+      pct: pct(Number(dre.resultado_bruto) - Number(dre.variacao_estoque) - Number(dre.total_despesas)),
       bold: true,
     },
   ];
@@ -224,12 +224,13 @@ function DrePage() {
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-3 gap-4 text-sm">
-              <Comp label="Gerencial" valor={Number(dre.resultado_liquido_gerencial)} />
+              <Comp label="Gerencial" valor={Number(dre.resultado_bruto) - Number(dre.variacao_estoque) - Number(dre.total_despesas)} />
               <Comp label="Fiscal" valor={fiscal.resultado_liquido_fiscal} />
               <Comp
                 label="Diferença"
-                valor={fiscal.resultado_liquido_fiscal - Number(dre.resultado_liquido_gerencial)}
+                valor={fiscal.resultado_liquido_fiscal - (Number(dre.resultado_bruto) - Number(dre.variacao_estoque) - Number(dre.total_despesas))}
               />
+
             </div>
           </CardContent>
         </Card>
@@ -294,7 +295,7 @@ function EditDreDialog({
       const totalDespesas = form.despesas.reduce((s, d) => s + (Number(d.valor) || 0), 0);
       const resultadoBruto = form.total_vendas - form.devolucoes - form.cmv;
       const variacao = form.estoque_inicial - form.estoque_final;
-      const resultadoLiq = resultadoBruto - totalDespesas;
+      const resultadoLiq = resultadoBruto - variacao - totalDespesas;
       const { data: dreRow, error } = await supabase
         .from("dre_mensal")
         .upsert(
