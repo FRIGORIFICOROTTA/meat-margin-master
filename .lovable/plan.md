@@ -1,49 +1,68 @@
-# Validação End-to-End com Dados Reais
+# Plano: Matriz/Filial + CRUD de empresas em Configurações
 
 ## Objetivo
-Antes de novas features, garantir que o fluxo principal (cadastro → onboarding → importação → DRE/Estoque/Despesas/Dashboard → exportação) funciona com um arquivo real do usuário, e corrigir tudo que aparecer no caminho.
+Eliminar a confusão do onboarding ("Primeira filial" quando na verdade é a matriz) e permitir cadastrar as demais unidades depois, com distinção formal de tipo.
 
-## Etapas
+## 1. Schema (migração Supabase)
 
-### 1. Smoke test do fluxo atual (sem código)
-- Subir Playwright em headless contra `localhost:8080`, autenticar via sessão Supabase injetada.
-- Percorrer: `/auth` → onboarding (criar grupo + empresa) → `/importar` → `/dre` → `/estoque` → `/despesas` → `/dashboard` → `/configuracoes`.
-- Screenshot em cada etapa + captura de console/network errors.
-- Resultado: lista priorizada de bugs reais (não suposições).
+- Criar enum `tipo_empresa` com valores `matriz` e `filial`.
+- Adicionar coluna `tipo tipo_empresa NOT NULL DEFAULT 'filial'` em `empresas`.
+- Backfill: marcar como `matriz` a empresa mais antiga de cada grupo (1 por grupo).
+- Índice único parcial: `UNIQUE (grupo_id) WHERE tipo = 'matriz'` — garante exatamente 1 matriz por grupo.
+- Manter RLS atual (não muda regra de acesso).
 
-### 2. Validar o edge function `extract-financial-data`
-- Testar com 3 amostras: planilha simples (xlsx), PDF de DRE escaneado, PDF de DRE digital.
-- Para cada amostra: chamar o edge function via `supabase--curl_edge_functions`, conferir JSON retornado contra o schema esperado em `dre_mensal` / `despesas_detalhe` / `inventario_itens`.
-- Verificar logs (`supabase--edge_function_logs`) e gasto de tokens no AI Gateway.
-- Ajustar prompt do Gemini, validação Zod do retorno, e mapeamento para colunas do banco se necessário.
+## 2. Onboarding (`src/routes/_authenticated/onboarding.tsx`)
 
-### 3. Corrigir bugs encontrados
-Categorias prováveis (a confirmar no passo 1-2):
-- **Parser/extração**: campos faltando, valores com vírgula vs ponto, sinais invertidos (despesa positiva), meses fora do range.
-- **UI**: estados vazios sem CTA, loaders travados, period selector permitindo intervalos sem dados.
-- **Cálculos**: divergência entre soma de `despesas_detalhe` e `total_despesas` no `dre_mensal`, fiscal vs gerencial com sinal errado.
-- **Exportação**: PDF cortando colunas, Excel sem formatação BRL, falhar quando não há dados no período.
-- **Permissões**: queries que esquecem `user_has_empresa_access`, RLS bloqueando legitimamente.
+- Renomear seção "Primeira filial" → **"Matriz do grupo"**.
+- Renomear "Nome da filial" → **"Nome da matriz"** com placeholder tipo `Ex: Rota das Carnes - Matriz - Brasília DF`.
+- Ao gravar, criar a empresa com `tipo = 'matriz'`.
+- Texto de apoio explicando: "Você poderá cadastrar as demais filiais depois em Configurações → Empresas."
 
-### 4. Hardening mínimo
-- Tratamento de erro padronizado nos `*.functions.ts` (toast amigável + log).
-- Mensagens claras quando o arquivo importado é rejeitado (motivo específico, não "erro genérico").
-- Reprocessar arquivo: botão em `/importar` para re-rodar extração num `arquivo_importado` existente.
-- Validação no upload: tamanho, tipo MIME, página máxima do PDF.
+## 3. Configurações → Empresas (`src/routes/_authenticated/configuracoes.tsx`)
 
-### 5. Documentação rápida
-- Atualizar `.lovable/plan.md` marcando Fase 1+2 como validadas.
-- Adicionar seção "Fluxo de teste" com os 3 arquivos-amostra e o resultado esperado.
+- Adicionar aba/seção **Empresas** com:
+  - Lista das empresas do grupo: nome, CNPJ, cidade/UF, regime, **badge Matriz/Filial**.
+  - Botão **Nova filial** abre dialog com os mesmos campos do onboarding (sem permitir tipo = matriz já existente).
+  - Editar empresa: nome, CNPJ, cidade, UF, regime, config tributária. Tipo bloqueado (não troca matriz/filial pela UI; se precisar, via suporte).
+  - Excluir empresa: bloqueado se for matriz e houver filiais; confirmação dupla; soft delete não — delete real respeitando FK (DRE/inventário/arquivos cascateiam por `grupo_id`/`empresa_id` conforme já existe).
+- Validação Zod nos formulários (nome, CNPJ formato, UF 2 chars, regime enum).
 
-## Entregáveis
-1. Relatório dos bugs encontrados (com screenshots/logs).
-2. Correções aplicadas em parser, UI, cálculos, exportação.
-3. Botão de reprocessamento em `/importar`.
-4. Mensagens de erro/empty-state melhoradas.
-5. Plan atualizado.
+## 4. UI auxiliar
 
-## Fora de escopo
-Contas a pagar/receber, conciliação bancária, multi-tenant billing, novas telas. Apenas validação e correção do que já existe.
+- **Seletor de empresa** (topbar): mostrar badge `Matriz` ao lado do nome quando aplicável.
+- **DRE / Despesas / Estoque / Dashboard**: nada muda na lógica — continuam por `empresa_id`. Apenas o título da página exibe o badge quando a empresa selecionada for matriz.
 
-## Pré-requisito
-Para o passo 2 preciso de pelo menos 1 arquivo real (xlsx ou PDF de DRE) que você usaria no dia-a-dia. Pode subir aqui no chat? Sem isso, faço só o passo 1 com dados sintéticos e o passo 2 fica para depois.
+## 5. Fora de escopo (deixar para depois)
+
+- DRE **consolidada do grupo** (somando matriz + filiais). Pode entrar como próxima fatia.
+- Transferência de matriz entre empresas (troca de tipo).
+- Hierarquia matriz → filial além de pertencer ao mesmo grupo.
+
+## Detalhes técnicos
+
+```sql
+CREATE TYPE public.tipo_empresa AS ENUM ('matriz','filial');
+ALTER TABLE public.empresas ADD COLUMN tipo public.tipo_empresa NOT NULL DEFAULT 'filial';
+
+WITH primeiras AS (
+  SELECT DISTINCT ON (grupo_id) id FROM public.empresas ORDER BY grupo_id, created_at ASC
+)
+UPDATE public.empresas SET tipo = 'matriz' WHERE id IN (SELECT id FROM primeiras);
+
+CREATE UNIQUE INDEX empresas_uma_matriz_por_grupo
+  ON public.empresas (grupo_id) WHERE tipo = 'matriz';
+```
+
+Arquivos a editar:
+- `supabase/migrations/<novo>.sql` (via tool de migração)
+- `src/routes/_authenticated/onboarding.tsx`
+- `src/routes/_authenticated/configuracoes.tsx`
+- `src/routes/_authenticated/route.tsx` (badge no seletor)
+- `src/lib/app-state.ts` (expor `tipo` no estado da empresa selecionada, se ainda não estiver)
+
+## Resultado esperado
+
+- Onboarding cria explicitamente a **matriz**.
+- Filiais são cadastradas em **Configurações → Empresas**, cada uma com seu CNPJ e regime.
+- Cada empresa tem sua DRE individual (matriz inclusive).
+- Sistema impede duas matrizes no mesmo grupo.

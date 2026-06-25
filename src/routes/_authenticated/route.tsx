@@ -41,7 +41,7 @@ function AuthLayout() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("empresas")
-        .select("id, nome, cnpj, regime_tributario, grupo_id")
+        .select("id, nome, cnpj, regime_tributario, grupo_id, tipo")
         .is("deleted_at", null)
         .order("nome");
       if (error) throw error;
@@ -130,6 +130,7 @@ function AuthLayout() {
                     {empresasQ.data.map((e) => (
                       <SelectItem key={e.id} value={e.id}>
                         {e.nome}
+                        {e.tipo === "matriz" ? " · Matriz" : ""}
                       </SelectItem>
                     ))}
                   </SelectContent>
