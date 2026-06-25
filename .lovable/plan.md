@@ -1,36 +1,38 @@
-# Causa raiz
+## Análise das melhorias commitadas (775eabb — "Corrigiu parser estoque PDF")
 
-Olhei o `__raw_preview` do arquivo "ESTOQUE 31 MAIO FORMOSA.pdf" no banco. O `unpdf` está devolvendo **todo o relatório em uma única linha gigante** (sem `\n` entre os itens). O parser atual faz:
+O commit refatora apenas `parseEstoque` em `supabase/functions/extract-financial-data/index.ts` (+81/-30). Pontos principais:
 
-```ts
-const lines = text.split(/\r?\n/)...
-const itemRe = /^(.*?)\s+([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)$/;
-```
+1. **Normalização mais agressiva** — colapsa NBSP, `\r`, `\n`, tabs em espaço único antes de processar.
+2. **Limpeza de ruído de página** — remove cabeçalhos/rodapés repetidos ("Página X de Y", linha de cabeçalho de colunas, "Livro de Registro de Inventário", "Emitido em ...", "Fls. N") substituindo por espaço para não colar tokens vizinhos.
+3. **Captura do total reportado *antes*** da limpeza, garantindo que regex de "Total Geral / Valor Total" não seja apagada.
+4. **Parser em duas etapas (mais robusto)**:
+   - Ancora em `UNIDADE + 3 números BR` com `\b` para não casar `KG` dentro de "1KG".
+   - Volta para a janela anterior e extrai `código + descrição`, tolerando produtos com dígitos no nome.
+5. **Diagnóstico**: se 0 itens, loga primeiros 3000 / últimos 1500 caracteres do texto flat.
+6. **Preview ampliado** para 3000 chars.
 
-Como só existe 1 linha contendo o relatório inteiro, a regex ancorada em `^...$` nunca casa → 0 itens → aviso "Nenhum item detectado automaticamente". O CNPJ e a data de referência são detectados porque não dependem de quebra de linha, e por isso o cartão aparece como "Extraído" mesmo com 0 itens.
+### Estado atual no banco
 
-O DRE provavelmente funciona porque o layout repete rótulos únicos (Receita Bruta, CMV…) que ainda casam via `findLineWith`, mas o inventário depende de linhas por item.
+Consultei `arquivos_importados`. Há dois PDFs de estoque, **ambos com `qtd_itens = 0`** e atualizados antes do deploy do novo parser:
+- `contagem estoque formosa abril.pdf` — status `extraido`, warning "nenhum item detectado".
+- `ESTOQUE 31 MAIO FORMOSA.pdf` — status `pendente` (nunca chegou a extrair).
 
-# Correção
+Ou seja, a correção foi **commitada mas ainda não validada contra os PDFs reais**.
 
-Na Edge Function `supabase/functions/extract-financial-data/index.ts`, função `parseEstoque`:
+### Riscos que vejo na nova lógica (a observar nos logs)
 
-1. **Re-linhar o texto antes do parse.** Antes do `split(/\r?\n/)`, normalizar:
-   - inserir `\n` antes de cada token que pareça início de item: `código (2-8 dígitos) + descrição + unidade (KG|UNID|UN|PC|...) + 3 números BR no fim`.
-   - Padrão proposto: inserir `\n` antes de `\b(\d{2,8})\s+(?=[A-ZÀ-Úa-zà-ú])` quando, dentro dos ~120 chars seguintes, houver `\b(KG|UNID|UN|PC|PCT|CX|LT|DZ|G|ML|L)\b` seguido de três grupos numéricos BR.
-   - Como fallback, também quebrar antes de cabeçalhos repetidos ("Código Produto Unid Qtde V.Unit V.Total", "Página X de Y", "Livro de registro de inventário", "Estoque existente em:") para isolar páginas.
+- `numSrc` aceita `\d+(?:[.,]\d+)?` sem milhar — pode casar pedaços de número de telefone/CNPJ se eles sobrarem perto da unidade.
+- O lookahead `(?=\s|$|[A-Za-zÀ-ÿ])` permite encostar em letra; combinado com a captura "janela anterior" pode incluir lixo do item anterior quando dois itens estiverem coladinhos.
+- `codeM` exige `[^\d]` após o código — descrições que começam com dígito (ex.: "1KG ALCATRA") forçam o fallback `fb`, que pega o código mas o produto começa com o token seguinte; verificar.
 
-2. **Aceitar `UNID` na lista de unidades** (hoje o regex tem `UN` mas o PDF usa `UNID`). Adicionar `UNID` ao `unidadeRe` e à ordem de match (mais longo primeiro: `UNID|KG|PCT|...|UN|...`).
+## Plano de validação
 
-3. **Tolerar item sem quebra perfeita.** Em vez de exigir `^...$`, varrer linha por linha procurando ocorrências do padrão item via `matchAll`, para o caso de duas linhas colarem.
+1. Garantir que a Edge Function está deployada com a versão do commit (deploy explícito `extract-financial-data`).
+2. Reprocessar com `force=true` os dois PDFs de estoque chamando `extract-financial-data` via curl autenticado.
+3. Consultar `arquivos_importados` para conferir `qtd_itens`, `total_valor`, `data_referencia` e `warnings`.
+4. Puxar `edge_function_logs` para ler o dump de 3000/1500 chars caso `qtd_itens` siga em 0.
+5. Conforme o resultado:
+   - **OK** → reporto métricas (itens detectados, total reportado vs somado) e encerro.
+   - **Ainda zero ou parcial** → uso o texto bruto do log pra ajustar a regex e proponho patch num plano novo.
 
-4. **Capturar total reportado** ampliando os rótulos: `total\s+geral`, `valor\s+total\s+do\s+estoque`, `total\s+do\s+invent[aá]rio`, e também a última ocorrência de "Total ... R$ X" no fim do documento.
-
-5. **Manter `__raw_preview`** (primeiros ~2000 chars) para diagnóstico futuro.
-
-Sem mudanças no DRE, no schema ou no front-end. Depois de aplicado, basta clicar **"Forçar reprocessar"** no card de Estoque para re-extrair sem precisar re-upload.
-
-# Validação
-
-- Reprocessar o arquivo `579f98b9-...` (ESTOQUE 31 MAIO FORMOSA) e verificar via `supabase--read_query` que `extracted_json->'itens'` tem comprimento > 0 e `total_valor` é numérico.
-- Confirmar no preview que o card mostra contagem de itens e total, sem o aviso amarelo.
+Sem alterações de schema. Sem alterações de UI. Só validação + eventual ajuste cirúrgico em `parseEstoque`.
