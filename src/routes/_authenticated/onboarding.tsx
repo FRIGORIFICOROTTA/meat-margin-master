@@ -64,7 +64,7 @@ function Onboarding() {
         );
       if (pErr) throw pErr;
 
-      // 3) empresa
+      // 3) empresa (matriz)
       const { data: emp, error: eErr } = await supabase
         .from("empresas")
         .insert({
@@ -74,6 +74,7 @@ function Onboarding() {
           uf: parsed.data.uf || null,
           cidade: parsed.data.cidade || null,
           regime_tributario: parsed.data.regime,
+          tipo: "matriz",
         })
         .select()
         .single();
@@ -98,8 +99,8 @@ function Onboarding() {
         <CardHeader>
           <CardTitle>Bem-vindo!</CardTitle>
           <CardDescription>
-            Vamos criar seu grupo econômico e a primeira filial. Você pode adicionar mais filiais
-            depois em Configurações.
+            Vamos criar seu grupo econômico e a empresa <strong>matriz</strong>. As demais filiais
+            podem ser adicionadas depois em <strong>Configurações → Empresas</strong>.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -113,10 +114,14 @@ function Onboarding() {
             <Field name="nomeUsuario" label="Seu nome" />
             <Field name="nomeGrupo" label="Nome do grupo" placeholder="Ex: Grupo Rota das Carnes" />
             <div className="border-t pt-4 mt-4">
-              <div className="text-sm font-semibold mb-3">Primeira filial</div>
-              <Field name="nomeEmpresa" label="Nome da filial" placeholder="Ex: Rota das Carnes - Filial 02 - Formosa GO" />
+              <div className="text-sm font-semibold mb-1">Matriz do grupo</div>
+              <p className="text-xs text-muted-foreground mb-3">
+                Cadastre aqui a empresa matriz (CNPJ principal). As filiais serão cadastradas
+                depois em Configurações.
+              </p>
+              <Field name="nomeEmpresa" label="Nome da matriz" placeholder="Ex: Rota das Carnes - Matriz - Brasília DF" />
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-3">
-                <Field name="cnpj" label="CNPJ" placeholder="00.000.000/0000-00" />
+                <Field name="cnpj" label="CNPJ da matriz" placeholder="00.000.000/0000-00" />
                 <Field name="cidade" label="Cidade" />
                 <Field name="uf" label="UF" maxLength={2} />
               </div>
