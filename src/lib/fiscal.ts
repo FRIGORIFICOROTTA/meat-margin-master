@@ -297,3 +297,9 @@ export function estimativaPorTributo(
   map.outros = 0;
   return map as Record<TipoLancamentoFiscal, number>;
 }
+
+export const REGIME_LABEL: Record<RegimeTributario, string> = {
+  simples: "Simples Nacional",
+  presumido: "Lucro Presumido",
+  real: "Lucro Real",
+};
