@@ -1,20 +1,24 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useEmpresaSelecionada, usePeriodo } from "@/lib/app-state";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { fmtBRL, fmtPct, mesNome } from "@/lib/finance";
 import { cn } from "@/lib/utils";
 import { calcularDREFiscal, REGIME_LABEL, type RegimeTributario, type ConfigTributaria } from "@/lib/fiscal";
 import { exportDREPdf, exportDREExcel, type LinhaExport } from "@/lib/export-utils";
-import { FileDown, FileSpreadsheet } from "lucide-react";
+import { FileDown, FileSpreadsheet, Pencil } from "lucide-react";
+import { DreEditor, type DreFormValues, emptyDreValues } from "@/components/DreEditor";
+import { toast } from "sonner";
 
 export const Route = createFileRoute("/_authenticated/dre")({
   component: DrePage,
 });
+
 
 function DrePage() {
   const [empresaId] = useEmpresaSelecionada();
