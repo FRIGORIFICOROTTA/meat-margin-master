@@ -244,6 +244,7 @@ export type Database = {
           ie: string | null
           nome: string
           regime_tributario: Database["public"]["Enums"]["regime_tributario"]
+          tipo: Database["public"]["Enums"]["tipo_empresa"]
           uf: string | null
           updated_at: string
         }
@@ -258,6 +259,7 @@ export type Database = {
           ie?: string | null
           nome: string
           regime_tributario?: Database["public"]["Enums"]["regime_tributario"]
+          tipo?: Database["public"]["Enums"]["tipo_empresa"]
           uf?: string | null
           updated_at?: string
         }
@@ -272,6 +274,7 @@ export type Database = {
           ie?: string | null
           nome?: string
           regime_tributario?: Database["public"]["Enums"]["regime_tributario"]
+          tipo?: Database["public"]["Enums"]["tipo_empresa"]
           uf?: string | null
           updated_at?: string
         }
@@ -485,6 +488,7 @@ export type Database = {
         | "confirmado"
         | "erro"
       tipo_arquivo: "dre" | "estoque_inicial" | "estoque_final"
+      tipo_empresa: "matriz" | "filial"
       tipo_inventario: "inicial" | "final"
     }
     CompositeTypes: {
@@ -623,6 +627,7 @@ export const Constants = {
         "erro",
       ],
       tipo_arquivo: ["dre", "estoque_inicial", "estoque_final"],
+      tipo_empresa: ["matriz", "filial"],
       tipo_inventario: ["inicial", "final"],
     },
   },
