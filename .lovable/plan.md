@@ -1,50 +1,49 @@
-# Próximo passo — Fatia 2
+# Validação End-to-End com Dados Reais
 
-A Fatia 1 entregou autenticação, multiempresa, importação de PDFs com Gemini, DRE Gerencial, estoque e dashboard. Agora avançamos para a camada fiscal e refinamentos.
+## Objetivo
+Antes de novas features, garantir que o fluxo principal (cadastro → onboarding → importação → DRE/Estoque/Despesas/Dashboard → exportação) funciona com um arquivo real do usuário, e corrigir tudo que aparecer no caminho.
 
-## Escopo
+## Etapas
 
-### 1. DRE Fiscal (alternável por empresa)
-- Toggle Gerencial / Fiscal na rota `/dre`.
-- Cálculo fiscal por regime tributário da empresa (Simples / Lucro Presumido / Lucro Real):
-  - Aplicar alíquotas configuradas em `empresas` sobre receita bruta.
-  - Deduções de impostos (ICMS, PIS, COFINS, ISS, IRPJ, CSLL) conforme regime.
-  - Receita líquida fiscal = bruta − impostos.
-  - Resultado fiscal usando variação de estoque oficial.
-- Comparativo lado-a-lado Gerencial × Fiscal (diferença e %).
+### 1. Smoke test do fluxo atual (sem código)
+- Subir Playwright em headless contra `localhost:8080`, autenticar via sessão Supabase injetada.
+- Percorrer: `/auth` → onboarding (criar grupo + empresa) → `/importar` → `/dre` → `/estoque` → `/despesas` → `/dashboard` → `/configuracoes`.
+- Screenshot em cada etapa + captura de console/network errors.
+- Resultado: lista priorizada de bugs reais (não suposições).
 
-### 2. Despesas detalhadas
-- Nova aba/rota `/despesas` listando `despesas_detalhe` do período.
-- Agrupamento por categoria com totais e % sobre receita.
-- Gráfico de pizza/barras das top categorias.
-- Filtro por empresa/período via app-state.
+### 2. Validar o edge function `extract-financial-data`
+- Testar com 3 amostras: planilha simples (xlsx), PDF de DRE escaneado, PDF de DRE digital.
+- Para cada amostra: chamar o edge function via `supabase--curl_edge_functions`, conferir JSON retornado contra o schema esperado em `dre_mensal` / `despesas_detalhe` / `inventario_itens`.
+- Verificar logs (`supabase--edge_function_logs`) e gasto de tokens no AI Gateway.
+- Ajustar prompt do Gemini, validação Zod do retorno, e mapeamento para colunas do banco se necessário.
 
-### 3. Exportação
-- Botão "Exportar PDF" na DRE (usando `@react-pdf/renderer` ou `jspdf`) com layout limpo, cabeçalho da empresa e período.
-- Botão "Exportar Excel" (usando `xlsx`) com abas: DRE, Despesas, Estoque.
-- Exportações respeitam o modo ativo (Gerencial/Fiscal).
+### 3. Corrigir bugs encontrados
+Categorias prováveis (a confirmar no passo 1-2):
+- **Parser/extração**: campos faltando, valores com vírgula vs ponto, sinais invertidos (despesa positiva), meses fora do range.
+- **UI**: estados vazios sem CTA, loaders travados, period selector permitindo intervalos sem dados.
+- **Cálculos**: divergência entre soma de `despesas_detalhe` e `total_despesas` no `dre_mensal`, fiscal vs gerencial com sinal errado.
+- **Exportação**: PDF cortando colunas, Excel sem formatação BRL, falhar quando não há dados no período.
+- **Permissões**: queries que esquecem `user_has_empresa_access`, RLS bloqueando legitimamente.
 
-### 4. Dashboard — histórico e comparativos
-- Adicionar série temporal de 12 meses (receita, margem, variação estoque).
-- Comparativo mês atual vs. mês anterior vs. mesmo mês ano anterior.
-- KPI consolidado do grupo (soma de todas empresas do grupo selecionado).
+### 4. Hardening mínimo
+- Tratamento de erro padronizado nos `*.functions.ts` (toast amigável + log).
+- Mensagens claras quando o arquivo importado é rejeitado (motivo específico, não "erro genérico").
+- Reprocessar arquivo: botão em `/importar` para re-rodar extração num `arquivo_importado` existente.
+- Validação no upload: tamanho, tipo MIME, página máxima do PDF.
 
-### 5. Polimentos
-- Loading states e empty states consistentes.
-- Validação de período sem dados (mostrar CTA para importar).
-- Toast de erro padronizado em todas as mutations.
+### 5. Documentação rápida
+- Atualizar `.lovable/plan.md` marcando Fase 1+2 como validadas.
+- Adicionar seção "Fluxo de teste" com os 3 arquivos-amostra e o resultado esperado.
 
-## Detalhes técnicos
+## Entregáveis
+1. Relatório dos bugs encontrados (com screenshots/logs).
+2. Correções aplicadas em parser, UI, cálculos, exportação.
+3. Botão de reprocessamento em `/importar`.
+4. Mensagens de erro/empty-state melhoradas.
+5. Plan atualizado.
 
-- **Cálculo fiscal**: criar `src/lib/fiscal.ts` com função pura `calcularDREFiscal(dre, empresa)` que recebe `dre_mensal` e config tributária e retorna estrutura comparável à gerencial.
-- **Server functions**: novos `*.functions.ts` em `src/lib/` para agregações de 12 meses e consolidação por grupo (evitar N queries no client).
-- **Exportação PDF**: `@react-pdf/renderer` (compatível com Worker via SSR opcional, ou gerar no client com `ClientOnly`).
-- **Exportação Excel**: `xlsx` (SheetJS) puro client.
-- **RLS**: queries continuam passando pelo `requireSupabaseAuth` e helper `user_has_empresa_access`.
+## Fora de escopo
+Contas a pagar/receber, conciliação bancária, multi-tenant billing, novas telas. Apenas validação e correção do que já existe.
 
-## Fora de escopo nesta fatia
-- Conciliação bancária, contas a pagar/receber, fluxo de caixa projetado.
-- Multi-tenant billing.
-- App mobile.
-
-Confirmar para eu implementar, ou ajustar prioridades (ex.: pular exportação, focar só em fiscal + despesas).
+## Pré-requisito
+Para o passo 2 preciso de pelo menos 1 arquivo real (xlsx ou PDF de DRE) que você usaria no dia-a-dia. Pode subir aqui no chat? Sem isso, faço só o passo 1 com dados sintéticos e o passo 2 fica para depois.
