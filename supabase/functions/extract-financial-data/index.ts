@@ -136,8 +136,8 @@ Deno.serve(async (req) => {
   let arquivoIdForError: string | null = null;
 
   try {
-    const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
-    if (!GEMINI_API_KEY) throw new Error("GEMINI_API_KEY não configurada");
+    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
+    if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY não configurada");
 
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
     const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -163,7 +163,6 @@ Deno.serve(async (req) => {
 
     if (arqErr || !arquivo) throw new Error("Arquivo não encontrado ou sem acesso");
 
-    // Idempotência: cache se já extraído/confirmado e não for `force`.
     if (
       !body.force &&
       (arquivo.status === "extraido" || arquivo.status === "confirmado") &&
@@ -200,42 +199,55 @@ Deno.serve(async (req) => {
     const prompt = isEstoque ? PROMPT_ESTOQUE : PROMPT_DRE;
     const schema = isEstoque ? SCHEMA_ESTOQUE : SCHEMA_DRE;
 
-    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
-
-    const geminiRes = await fetch(geminiUrl, {
+    // Lovable AI Gateway (OpenAI-compatible). Suporta PDF via content type "file".
+    const aiRes = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${LOVABLE_API_KEY}`,
+      },
       body: JSON.stringify({
-        contents: [
+        model: "google/gemini-2.5-flash",
+        temperature: 0,
+        max_tokens: 32768,
+        messages: [
           {
             role: "user",
-            parts: [
-              { text: prompt },
-              { inlineData: { mimeType: "application/pdf", data: pdf_base64 } },
+            content: [
+              { type: "text", text: prompt },
+              {
+                type: "file",
+                file: {
+                  filename: "documento.pdf",
+                  file_data: `data:application/pdf;base64,${pdf_base64}`,
+                },
+              },
             ],
           },
         ],
-        generationConfig: {
-          responseMimeType: "application/json",
-          responseSchema: schema,
-          temperature: 0.0,
-          maxOutputTokens: 32768,
+        response_format: {
+          type: "json_schema",
+          json_schema: { name: "extracao", strict: true, schema },
         },
       }),
     });
 
-    if (!geminiRes.ok) {
-      const txt = await geminiRes.text();
-      throw new Error(`Gemini erro ${geminiRes.status}: ${txt.slice(0, 800)}`);
+    if (!aiRes.ok) {
+      const txt = await aiRes.text();
+      if (aiRes.status === 429)
+        throw new Error("Limite de requisições atingido (429). Tente novamente em alguns instantes.");
+      if (aiRes.status === 402)
+        throw new Error("Créditos do Lovable AI esgotados (402). Adicione créditos em Configurações → Plans & credits.");
+      throw new Error(`Lovable AI erro ${aiRes.status}: ${txt.slice(0, 800)}`);
     }
 
-    const geminiJson = await geminiRes.json();
-    const text: string =
-      geminiJson?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+    const aiJson = await aiRes.json();
+    const text: string = aiJson?.choices?.[0]?.message?.content ?? "";
     if (!text) {
-      const finishReason = geminiJson?.candidates?.[0]?.finishReason ?? "unknown";
-      throw new Error(`Gemini retornou resposta vazia (finishReason=${finishReason})`);
+      const finishReason = aiJson?.choices?.[0]?.finish_reason ?? "unknown";
+      throw new Error(`AI retornou resposta vazia (finish_reason=${finishReason})`);
     }
+
 
     let parsed: unknown;
     try {
