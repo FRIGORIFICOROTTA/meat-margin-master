@@ -359,7 +359,7 @@ function EditDreDialog({
 // Helper para evitar warning sobre uso de emptyDreValues — disponível para futuros lançamentos manuais.
 void emptyDreValues;
 
-
+function Comp({ label, valor }: { label: string; valor: number }) {
   return (
     <div className="rounded border p-3">
       <div className="text-xs text-muted-foreground">{label}</div>
@@ -374,3 +374,4 @@ void emptyDreValues;
     </div>
   );
 }
+
