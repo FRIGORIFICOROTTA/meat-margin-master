@@ -221,6 +221,9 @@ function DrePage() {
           <Button variant="outline" size="sm" onClick={onXlsx}>
             <FileSpreadsheet className="h-4 w-4 mr-1" /> Excel
           </Button>
+          <Button variant="outline" size="sm" onClick={onMemorial} title="Relatório técnico das fórmulas para o contador validar">
+            <ScrollText className="h-4 w-4 mr-1" /> Memorial p/ Contador
+          </Button>
         </div>
 
       </div>
