@@ -11,7 +11,8 @@ import { fmtBRL, fmtPct, mesNome } from "@/lib/finance";
 import { cn } from "@/lib/utils";
 import { calcularDREFiscal, calcularDREFiscalReal, REGIME_LABEL, type RegimeTributario, type ConfigTributaria } from "@/lib/fiscal";
 import { exportDREPdf, exportDREExcel, type LinhaExport } from "@/lib/export-utils";
-import { FileDown, FileSpreadsheet, Pencil } from "lucide-react";
+import { exportMemorialCalculoPdf } from "@/lib/memorial-export";
+import { FileDown, FileSpreadsheet, Pencil, ScrollText } from "lucide-react";
 import { DreEditor, type DreFormValues, emptyDreValues } from "@/components/DreEditor";
 import { toast } from "sonner";
 
