@@ -1,7 +1,5 @@
-// Memorial de Cálculo — PDF formatado conforme ABNT NBR 14724.
-// A4 retrato, margens 3-2-2-3 cm (sup/dir/inf/esq), fonte Times 12pt,
-// espaçamento 1,5, texto justificado, paginação superior direita,
-// títulos primários em CAIXA ALTA negrito, secundários em CAIXA ALTA.
+// Memorial de Cálculo — PDF para validação do contador.
+// Documenta todas as fórmulas e critérios usados nas DREs Gerencial e Fiscal.
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { fmtBRL, fmtPct, mesNome } from "@/lib/finance";
@@ -55,62 +53,32 @@ export type MemorialOpts = {
   temLancamentosReais: boolean;
 };
 
-// ABNT — medidas em pontos (1 cm = 28.3465 pt)
-const CM = 28.3465;
-const M_TOP = 3 * CM;
-const M_LEFT = 3 * CM;
-const M_RIGHT = 2 * CM;
-const M_BOTTOM = 2 * CM;
-const FONT = "times";
-const FS_BODY = 12;
-const FS_SECTION = 12;
-const FS_NOTE = 10;
-const LH = FS_BODY * 1.5; // entrelinha 1,5
+const PRIMARY: [number, number, number] = [153, 60, 29]; // Meat Red
 
 export function exportMemorialCalculoPdf(opts: MemorialOpts) {
   const doc = new jsPDF({ unit: "pt", format: "a4" });
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
-  const contentW = pageW - M_LEFT - M_RIGHT;
-  const bottomLimit = pageH - M_BOTTOM;
+  const margin = 40;
+  let y = margin;
 
-  // ========================= CAPA (ABNT) =========================
-  doc.setFont(FONT, "bold");
-  doc.setFontSize(12);
-  const topBlock = [
-    "GRUPO ROTA DAS CARNES",
-    opts.grupo ? opts.grupo.toUpperCase() : "",
-    opts.empresa.toUpperCase(),
-  ].filter(Boolean);
-  let cy = M_TOP;
-  for (const t of topBlock) {
-    doc.text(t, pageW / 2, cy, { align: "center" });
-    cy += LH;
-  }
+  // ---------- Cabeçalho ----------
+  doc.setFillColor(...PRIMARY);
+  doc.rect(0, 0, pageW, 70, "F");
+  doc.setTextColor(255);
+  doc.setFontSize(16);
+  doc.setFont("helvetica", "bold");
+  doc.text("Memorial de Cálculo — DRE Gerencial e Fiscal", margin, 32);
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "normal");
+  doc.text("Documento técnico para validação contábil", margin, 50);
+  y = 90;
 
-  doc.setFontSize(14);
-  doc.text("MEMORIAL DE CÁLCULO", pageW / 2, pageH / 2 - LH, { align: "center" });
-  doc.setFontSize(12);
-  doc.setFont(FONT, "normal");
-  const subtitulo = doc.splitTextToSize(
-    "Demonstração do Resultado do Exercício — Visões Gerencial e Fiscal — " +
-      `Apuração de ${mesNome(opts.mes)} de ${opts.ano}`,
-    contentW,
-  );
-  doc.text(subtitulo, pageW / 2, pageH / 2 + 4, { align: "center" });
+  // ---------- Identificação ----------
+  doc.setTextColor(0);
+  section(doc, "1. Identificação", y);
+  y += 18;
 
-  doc.setFont(FONT, "normal");
-  doc.setFontSize(12);
-  const local = "Brasil";
-  doc.text(local, pageW / 2, pageH - M_BOTTOM - LH, { align: "center" });
-  doc.text(String(opts.ano), pageW / 2, pageH - M_BOTTOM, { align: "center" });
-
-  // ========================= CORPO =========================
-  doc.addPage();
-  const state = { y: M_TOP };
-
-  // 1 IDENTIFICAÇÃO
-  primary(doc, "1 IDENTIFICAÇÃO", state);
   const ident: Array<[string, string]> = [
     ["Empresa", opts.empresa],
     ["CNPJ", opts.cnpj || "—"],
@@ -119,112 +87,135 @@ export function exportMemorialCalculoPdf(opts: MemorialOpts) {
     ["Período de Apuração", `${mesNome(opts.mes)}/${opts.ano}`],
     ["Data de Emissão", new Date().toLocaleString("pt-BR")],
   ];
-  abntTable(doc, state, ident, [0.35, 0.65], { firstBold: true });
+  autoTable(doc, {
+    startY: y,
+    body: ident,
+    theme: "plain",
+    styles: { fontSize: 9, cellPadding: 3 },
+    columnStyles: { 0: { fontStyle: "bold", cellWidth: 140 } },
+    margin: { left: margin, right: margin },
+  });
+  y = (doc as any).lastAutoTable.finalY + 16;
 
-  // 2 ORIGEM DOS DADOS
-  primary(doc, "2 ORIGEM DOS DADOS", state);
-  body(
+  // ---------- Origem dos dados ----------
+  y = section(doc, "2. Origem dos Dados", y);
+  y = paragraph(
     doc,
-    state,
-    "Os valores gerenciais (receita bruta, devoluções, custo das mercadorias vendidas, " +
-      "despesas operacionais e estoques) são extraídos por meio de leitor determinístico " +
-      "dos relatórios em formato PDF emitidos pelo sistema de gestão empresarial (ERP) do " +
-      "grupo, especificamente a Demonstração do Resultado mensal e os Inventários Inicial " +
-      "e Final. Antes da persistência no banco de dados, o usuário revisa e confirma os " +
-      "valores na interface de Importação. Subtotais e categorias-pai presentes no relatório " +
-      "do ERP são descartados por heurística para evitar dupla contagem. O processo é " +
-      "idempotente: a reimportação de arquivos referentes ao mesmo período substitui " +
-      "integralmente os dados anteriores, sem duplicidade.",
-    contentW,
+    "Os valores gerenciais (receita, CMV, despesas e estoques) são extraídos por parser " +
+      "determinístico dos relatórios em PDF emitidos pelo ERP do grupo (DRE mensal e Inventário " +
+      "Inicial/Final). Antes da persistência, o usuário revisa e confirma os valores na tela de " +
+      "Importação. Subtotais e categorias-pai do PDF são descartados por heurística para evitar " +
+      "dupla contagem. A importação é idempotente: novo upload do mesmo período substitui o anterior.",
+    y,
+    margin,
+    pageW - 2 * margin,
   );
+  y += 8;
 
-  // 3 DRE GERENCIAL — FÓRMULAS
-  primary(doc, "3 DRE GERENCIAL — FÓRMULAS", state);
-  body(
+  // ---------- DRE Gerencial ----------
+  y = section(doc, "3. DRE Gerencial — Fórmulas", y);
+  y = formulasTable(
     doc,
-    state,
-    "A Demonstração do Resultado na visão gerencial é calculada conforme as fórmulas " +
-      "apresentadas a seguir, observando que a Variação de Estoque é incorporada ao custo " +
-      "para refletir o consumo físico do período.",
-    contentW,
-  );
-  abntTable(
-    doc,
-    state,
     [
-      ["Receita Bruta", "total_vendas (ERP)"],
-      ["(−) Devoluções", "devolucoes (ERP)"],
+      ["Receita Bruta", "total_vendas (do ERP)"],
+      ["(−) Devoluções", "devolucoes (do ERP)"],
       ["= Receita Líquida Gerencial", "Receita Bruta − Devoluções"],
-      ["(−) CMV", "cmv (custo das mercadorias vendidas)"],
-      ["(±) Variação de Estoque", "Estoque Inicial − Estoque Final"],
+      ["(−) CMV", "cmv (do ERP, custo das mercadorias vendidas)"],
+      [
+        "(±) Variação de Estoque",
+        "Estoque Inicial − Estoque Final  (positiva = consumo extra; aumenta o custo)",
+      ],
       ["= CMV Ajustado", "CMV + Variação de Estoque"],
       ["= Resultado Bruto", "Receita Líquida − CMV Ajustado"],
       ["(−) Despesas Operacionais", "Σ despesas_detalhe.valor"],
-      ["= Resultado Líquido Gerencial", "Resultado Bruto − Despesas Operacionais"],
+      [
+        "= Resultado Líquido Gerencial",
+        "Resultado Bruto − Despesas Operacionais",
+      ],
     ],
-    [0.45, 0.55],
-    { firstBold: true, header: ["Linha", "Fórmula / Origem"] },
+    y,
+    margin,
+    pageW,
   );
 
-  // 4 DRE FISCAL — ESTIMATIVA
-  primary(doc, "4 DRE FISCAL — ESTIMATIVA AUTOMÁTICA", state);
-  body(
+  // ---------- DRE Fiscal Estimado ----------
+  y = ensureSpace(doc, y, 80, margin);
+  y = section(doc, "4. DRE Fiscal — Estimativa Automática", y);
+  y = paragraph(
     doc,
-    state,
-    "A DRE Fiscal Estimada aplica as alíquotas configuradas para o regime tributário " +
-      "vigente sobre a Base Tributável (Receita Bruta deduzida das Devoluções) e, conforme " +
-      "o regime, sobre o lucro apurado. As alíquotas são armazenadas no campo " +
-      "config_tributaria da empresa; valores ausentes assumem os parâmetros-padrão " +
-      "definidos no módulo fiscal do sistema.",
-    contentW,
+    "A DRE Fiscal Estimada aplica as alíquotas configuradas para o regime sobre a base tributável " +
+      "(Receita Bruta − Devoluções) e, conforme o regime, sobre o lucro. As alíquotas vivem em " +
+      "empresas.config_tributaria; valores ausentes assumem os defaults definidos em src/lib/fiscal.ts.",
+    y,
+    margin,
+    pageW - 2 * margin,
   );
-  secondary(doc, "4.1 FÓRMULAS POR REGIME", state);
-  abntTable(doc, state, regimeFormulas(opts.regime), [0.45, 0.55], {
-    firstBold: true,
-    header: ["Linha", "Fórmula"],
-  });
+  y += 4;
 
-  secondary(doc, "4.2 ALÍQUOTAS CONFIGURADAS", state);
+  const fRows = regimeFormulas(opts.regime);
+  y = formulasTable(doc, fRows, y, margin, pageW);
+
+  // Tabela de alíquotas efetivas
+  y = ensureSpace(doc, y, 100, margin);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(10);
+  doc.text("Alíquotas configuradas nesta empresa", margin, y);
+  y += 6;
   const cfg = mergeConfig(opts.regime, opts.config);
-  abntTable(doc, state, aliquotasRows(opts.regime, cfg), [0.5, 0.25, 0.25], {
-    header: ["Parâmetro", "Valor", "Origem"],
-    alignRight: [1],
+  const aliqRows = aliquotasRows(opts.regime, cfg);
+  autoTable(doc, {
+    startY: y,
+    head: [["Parâmetro", "Valor", "Origem"]],
+    body: aliqRows,
+    styles: { fontSize: 9, cellPadding: 5 },
+    headStyles: { fillColor: PRIMARY, textColor: 255 },
+    columnStyles: { 1: { halign: "right", cellWidth: 80 }, 2: { cellWidth: 90 } },
+    margin: { left: margin, right: margin },
   });
+  y = (doc as any).lastAutoTable.finalY + 16;
 
-  // 5 DRE FISCAL REAL
-  primary(doc, "5 DRE FISCAL — VALORES REAIS (LANÇAMENTOS)", state);
-  body(
+  // ---------- DRE Fiscal Real ----------
+  y = ensureSpace(doc, y, 80, margin);
+  y = section(doc, "5. DRE Fiscal — Valores Reais (Lançamentos)", y);
+  y = paragraph(
     doc,
-    state,
-    "Quando o usuário registra valores efetivamente recolhidos (DAS, DARF e demais guias) " +
-      "na tela de Lançamentos Fiscais, o sistema substitui, tributo a tributo, a estimativa " +
-      "pelo valor real. Tributos sem lançamento permanecem com a estimativa. Ajustes do " +
-      "tipo Outros são aplicados com sinal: +1 (despesa) acresce ao total de tributos e −1 " +
-      "(crédito) reduz. A base operacional — Receita Bruta deduzida do CMV Ajustado e das " +
-      "Despesas Operacionais — é idêntica àquela utilizada na visão Gerencial; portanto, " +
-      "a diferença entre os resultados Gerencial e Fiscal corresponde exclusivamente ao " +
-      "bloco de tributos do período.",
-    contentW,
+    "Quando o usuário lança valores efetivamente pagos (DAS, DARF, guias) na tela de Lançamentos " +
+      "Fiscais, o sistema substitui a estimativa pelo valor real, tributo a tributo. Tributos sem " +
+      "lançamento continuam usando a estimativa. Ajustes do tipo 'Outros' entram com sinal: " +
+      "+1 (despesa) soma aos tributos; −1 (crédito) abate. A base operacional (Receita − CMV " +
+      "Ajustado − Despesas) é idêntica à da visão Gerencial — a diferença entre Gerencial e Fiscal " +
+      "corresponde exclusivamente ao bloco de tributos.",
+    y,
+    margin,
+    pageW - 2 * margin,
   );
+  y += 8;
 
-  // 6 EXEMPLO NUMÉRICO
-  primary(doc, `6 EXEMPLO NUMÉRICO — ${mesNome(opts.mes).toUpperCase()}/${opts.ano}`, state);
+  // ---------- Exemplo numérico ----------
+  doc.addPage();
+  y = margin;
+  y = section(doc, `6. Exemplo Numérico — ${mesNome(opts.mes)}/${opts.ano}`, y);
+
   const v = opts.dre.total_vendas;
   const pct = (n: number) => (v > 0 ? n / v : 0);
   const fmt = (n: number) => fmtBRL(n);
   const fmtP = (n: number) => (v > 0 ? fmtPct(pct(n)) : "—");
 
-  secondary(doc, "6.1 DRE GERENCIAL", state);
-  const ger: Array<[string, string, string]> = [
+  // Gerencial
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(10);
+  doc.text("6.1 DRE Gerencial", margin, y);
+  y += 6;
+  const gerLinhas: Array<[string, string, string]> = [
     ["Receita Bruta (Vendas)", fmt(v), fmtP(v)],
     ["(−) Devoluções", fmt(-opts.dre.devolucoes), fmtP(-opts.dre.devolucoes)],
-    ["(−) CMV", fmt(-opts.dre.cmv), fmt(-opts.dre.cmv) === fmt(0) ? "—" : fmtP(-opts.dre.cmv)],
-    ["(±) Variação de Estoque", fmt(-opts.dre.variacao_estoque), fmtP(-opts.dre.variacao_estoque)],
+    ["(−) CMV", fmt(-opts.dre.cmv), fmtP(-opts.dre.cmv)],
     [
-      "= Resultado Bruto Ajustado",
-      fmt(opts.dre.resultado_bruto - opts.dre.variacao_estoque),
-      fmtP(opts.dre.resultado_bruto - opts.dre.variacao_estoque),
+      "(±) Variação de Estoque",
+      fmt(-opts.dre.variacao_estoque),
+      fmtP(-opts.dre.variacao_estoque),
     ],
+    ["= Resultado Bruto Ajustado", fmt(opts.dre.resultado_bruto - opts.dre.variacao_estoque), fmtP(opts.dre.resultado_bruto - opts.dre.variacao_estoque)],
     ["(−) Despesas Operacionais", fmt(-opts.dre.total_despesas), fmtP(-opts.dre.total_despesas)],
     [
       "= Resultado Líquido Gerencial",
@@ -232,102 +223,119 @@ export function exportMemorialCalculoPdf(opts: MemorialOpts) {
       fmtP(opts.dre.resultado_liquido_gerencial),
     ],
   ];
-  abntTable(doc, state, ger, [0.55, 0.25, 0.2], {
-    header: ["Descrição", "Valor (R$)", "% Receita"],
-    alignRight: [1, 2],
-    boldOn: (r) => r[0].startsWith("="),
+  autoTable(doc, {
+    startY: y,
+    head: [["Descrição", "Valor", "% Receita"]],
+    body: gerLinhas,
+    styles: { fontSize: 9, cellPadding: 5 },
+    headStyles: { fillColor: PRIMARY, textColor: 255 },
+    columnStyles: { 1: { halign: "right" }, 2: { halign: "right", cellWidth: 70 } },
+    didParseCell: (data) => {
+      const label = gerLinhas[data.row.index]?.[0] ?? "";
+      if (label.startsWith("=")) data.cell.styles.fontStyle = "bold";
+    },
+    margin: { left: margin, right: margin },
   });
+  y = (doc as any).lastAutoTable.finalY + 14;
 
-  secondary(doc, "6.2 DRE FISCAL ESTIMADA", state);
-  fiscalAbntTable(doc, state, opts.fiscalEstimado);
+  // Fiscal estimado
+  y = ensureSpace(doc, y, 120, margin);
+  doc.setFont("helvetica", "bold");
+  doc.text("6.2 DRE Fiscal Estimada", margin, y);
+  y += 6;
+  y = fiscalTable(doc, opts.fiscalEstimado, y, margin, PRIMARY);
 
+  // Fiscal real (se houver)
   if (opts.fiscalReal && opts.temLancamentosReais) {
-    secondary(doc, "6.3 DRE FISCAL REAL", state);
-    fiscalAbntTable(doc, state, opts.fiscalReal);
+    y = ensureSpace(doc, y, 120, margin);
+    doc.setFont("helvetica", "bold");
+    doc.text("6.3 DRE Fiscal Real (com lançamentos efetivos)", margin, y);
+    y += 6;
+    y = fiscalTable(doc, opts.fiscalReal, y, margin, PRIMARY);
   }
 
-  // 7 GLOSSÁRIO E PREMISSAS
-  primary(doc, "7 GLOSSÁRIO E PREMISSAS", state);
+  // ---------- Glossário ----------
+  y = ensureSpace(doc, y, 160, margin);
+  y = section(doc, "7. Glossário e Premissas", y);
   const glossario: Array<[string, string]> = [
     ["CMV", "Custo da Mercadoria Vendida, conforme apurado pelo ERP."],
     [
       "Variação de Estoque",
-      "Diferença entre Estoque Inicial e Estoque Final. Quando positiva, indica consumo físico superior ao registrado no CMV, aumentando o custo real do período.",
+      "Diferença Estoque Inicial − Estoque Final. Positiva indica consumo físico superior ao registrado em CMV (aumenta o custo real do período).",
     ],
     [
       "CMV Ajustado",
-      "Soma do CMV com a Variação de Estoque. Constitui a base operacional comum às visões Gerencial e Fiscal.",
+      "CMV + Variação de Estoque. É a base operacional usada tanto na DRE Gerencial quanto na Fiscal.",
     ],
     [
       "Base Tributável",
-      "Receita Bruta deduzida das Devoluções. Aplica-se às alíquotas de PIS, COFINS, ICMS, ISS e DAS.",
+      "Receita Bruta − Devoluções. Aplica-se às alíquotas de PIS, COFINS, ICMS, ISS e DAS.",
     ],
     [
       "Presunção (Lucro Presumido)",
-      "Percentual da receita utilizado como base de cálculo do IRPJ e da CSLL (parâmetros-padrão: 8% e 12% para a atividade comercial, respectivamente).",
+      "Percentual da receita usado como base de IRPJ/CSLL (defaults: 8% IRPJ e 12% CSLL para comércio).",
     ],
     [
       "Lucro Real (IRPJ/CSLL)",
-      "Tributos incidentes sobre o Lucro antes do IR quando positivo; nulos em caso de prejuízo no período.",
+      "Aplicado sobre o Lucro antes do IR quando positivo; zero quando o resultado for prejuízo.",
     ],
     [
       "Idempotência",
-      "A reimportação de PDFs referentes ao mesmo período substitui os dados anteriormente persistidos, garantindo unicidade.",
+      "Reimportar PDFs do mesmo período substitui os dados anteriores — não há duplicação.",
     ],
     [
       "Subtotais",
-      "Linhas de subtotal e categorias-pai do relatório do ERP são descartadas no leitor para evitar dupla contagem.",
+      "Linhas de subtotal/categoria-pai do PDF do ERP são descartadas no parser para evitar dupla contagem.",
     ],
   ];
-  abntTable(doc, state, glossario, [0.3, 0.7], { firstBold: true });
+  autoTable(doc, {
+    startY: y,
+    body: glossario,
+    theme: "plain",
+    styles: { fontSize: 9, cellPadding: 4 },
+    columnStyles: { 0: { fontStyle: "bold", cellWidth: 130 } },
+    margin: { left: margin, right: margin },
+  });
+  y = (doc as any).lastAutoTable.finalY + 20;
 
-  // 8 PARECER DO CONTADOR
-  primary(doc, "8 PARECER DO CONTADOR RESPONSÁVEL", state);
-  body(
-    doc,
-    state,
-    "Declaro que examinei o presente Memorial de Cálculo e atesto que as fórmulas, " +
-      "critérios e premissas nele descritos estão aderentes à legislação tributária " +
-      "aplicável ao regime informado e ao período em análise.",
-    contentW,
+  // ---------- Parecer do contador ----------
+  y = ensureSpace(doc, y, 180, margin);
+  y = section(doc, "8. Parecer do Contador Responsável", y);
+  doc.setFontSize(9);
+  doc.setFont("helvetica", "normal");
+  doc.text(
+    "Confirmo que as lógicas de cálculo descritas neste memorial estão aderentes à legislação " +
+      "tributária aplicável ao regime informado e ao período em análise.",
+    margin,
+    y,
+    { maxWidth: pageW - 2 * margin },
   );
-  ensureSpace(doc, state, 130);
-  state.y += LH;
-  const colW = (contentW - 20) / 2;
-  field(doc, "Nome completo", M_LEFT, state.y, colW);
-  field(doc, "CRC", M_LEFT + colW + 20, state.y, colW);
-  state.y += 36;
-  field(doc, "Data", M_LEFT, state.y, colW);
-  field(doc, "Assinatura", M_LEFT + colW + 20, state.y, colW);
-  state.y += 40;
-  doc.setFont(FONT, "normal");
-  doc.setFontSize(FS_BODY);
-  doc.text("Parecer:  (  ) De acordo     (  ) Ajustes necessários", M_LEFT, state.y);
-  state.y += LH;
-  hr(doc, M_LEFT, state.y, pageW - M_RIGHT);
-  state.y += LH;
-  hr(doc, M_LEFT, state.y, pageW - M_RIGHT);
+  y += 30;
+  const colW = (pageW - 2 * margin - 20) / 2;
+  field(doc, "Nome", margin, y, colW);
+  field(doc, "CRC", margin + colW + 20, y, colW);
+  y += 36;
+  field(doc, "Data", margin, y, colW);
+  field(doc, "Assinatura", margin + colW + 20, y, colW);
+  y += 50;
+  doc.setFontSize(9);
+  doc.text("Parecer:  (  ) De acordo     (  ) Ajustes necessários", margin, y);
+  y += 16;
+  line(doc, margin, y, pageW - margin);
+  y += 16;
+  line(doc, margin, y, pageW - margin);
 
-  // Paginação ABNT — topo direito, contando a partir da capa mas exibindo só a partir da pg 2
+  // ---------- Rodapé ----------
   const total = doc.getNumberOfPages();
-  for (let i = 2; i <= total; i++) {
-    doc.setPage(i);
-    doc.setFont(FONT, "normal");
-    doc.setFontSize(FS_NOTE);
-    doc.setTextColor(0);
-    doc.text(String(i), pageW - M_RIGHT, M_TOP / 2 + 4, { align: "right" });
-  }
-  // Rodapé discreto com identificação documental — não exigido pela ABNT mas útil
   for (let i = 1; i <= total; i++) {
     doc.setPage(i);
     doc.setFontSize(8);
-    doc.setTextColor(120);
+    doc.setTextColor(150);
     doc.text(
-      `${opts.empresa} · ${mesNome(opts.mes)}/${opts.ano} · Memorial de Cálculo`,
-      M_LEFT,
-      pageH - M_BOTTOM / 2,
+      `${opts.empresa} · ${mesNome(opts.mes)}/${opts.ano} · Memorial de Cálculo · Página ${i}/${total}`,
+      margin,
+      pageH - 16,
     );
-    doc.setTextColor(0);
   }
 
   doc.save(
@@ -335,143 +343,52 @@ export function exportMemorialCalculoPdf(opts: MemorialOpts) {
   );
 }
 
-// ============== Helpers ABNT ==============
+// ---------------- helpers ----------------
 
-type CursorState = { y: number };
-
-function ensureSpace(doc: jsPDF, state: CursorState, needed: number) {
-  const limit = doc.internal.pageSize.getHeight() - M_BOTTOM;
-  if (state.y + needed > limit) {
-    doc.addPage();
-    state.y = M_TOP;
-  }
-}
-
-function primary(doc: jsPDF, title: string, state: CursorState) {
-  ensureSpace(doc, state, LH * 2);
-  state.y += LH * 0.5;
-  doc.setFont(FONT, "bold");
-  doc.setFontSize(FS_SECTION);
+function section(doc: jsPDF, title: string, y: number): number {
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(12);
+  doc.setTextColor(...PRIMARY);
+  doc.text(title, 40, y);
   doc.setTextColor(0);
-  doc.text(title, M_LEFT, state.y);
-  state.y += LH;
+  doc.setLineWidth(0.5);
+  doc.setDrawColor(...PRIMARY);
+  doc.line(40, y + 3, doc.internal.pageSize.getWidth() - 40, y + 3);
+  return y + 16;
 }
 
-function secondary(doc: jsPDF, title: string, state: CursorState) {
-  ensureSpace(doc, state, LH * 2);
-  state.y += LH * 0.3;
-  doc.setFont(FONT, "normal");
-  doc.setFontSize(FS_SECTION);
-  doc.text(title, M_LEFT, state.y);
-  state.y += LH;
-}
-
-function body(doc: jsPDF, state: CursorState, text: string, maxW: number) {
-  doc.setFont(FONT, "normal");
-  doc.setFontSize(FS_BODY);
-  doc.setTextColor(0);
-  const lines = doc.splitTextToSize(text, maxW);
-  const needed = lines.length * LH;
-  ensureSpace(doc, state, needed);
-  // recorte e paginação linha a linha para respeitar margens
-  for (const ln of lines) {
-    ensureSpace(doc, state, LH);
-    doc.text(ln, M_LEFT, state.y, {
-      align: "justify",
-      maxWidth: maxW,
-    });
-    state.y += LH;
-  }
-  state.y += LH * 0.3;
-}
-
-function abntTable(
+function paragraph(
   doc: jsPDF,
-  state: CursorState,
-  rows: Array<string[]>,
-  widthsPct: number[],
-  opts: {
-    header?: string[];
-    firstBold?: boolean;
-    alignRight?: number[];
-    boldOn?: (row: string[]) => boolean;
-  } = {},
-) {
-  const contentW = doc.internal.pageSize.getWidth() - M_LEFT - M_RIGHT;
-  const colStyles: Record<number, any> = {};
-  widthsPct.forEach((p, i) => {
-    colStyles[i] = { cellWidth: contentW * p };
-  });
-  if (opts.firstBold) {
-    colStyles[0] = { ...(colStyles[0] || {}), fontStyle: "bold" };
-  }
-  if (opts.alignRight) {
-    for (const i of opts.alignRight) {
-      colStyles[i] = { ...(colStyles[i] || {}), halign: "right" };
-    }
-  }
-  autoTable(doc, {
-    startY: state.y,
-    head: opts.header ? [opts.header] : undefined,
-    body: rows,
-    theme: "grid",
-    styles: {
-      font: FONT,
-      fontSize: FS_NOTE,
-      cellPadding: 4,
-      textColor: 0,
-      lineColor: [0, 0, 0],
-      lineWidth: 0.4,
-    },
-    headStyles: {
-      font: FONT,
-      fontStyle: "bold",
-      fillColor: [255, 255, 255],
-      textColor: 0,
-      lineColor: [0, 0, 0],
-      lineWidth: 0.4,
-      halign: "left",
-    },
-    columnStyles: colStyles,
-    margin: { left: M_LEFT, right: M_RIGHT, top: M_TOP, bottom: M_BOTTOM },
-    didParseCell: (data) => {
-      if (data.section !== "body") return;
-      if (opts.boldOn && opts.boldOn(rows[data.row.index] as string[])) {
-        data.cell.styles.fontStyle = "bold";
-      }
-    },
-  });
-  state.y = (doc as any).lastAutoTable.finalY + LH * 0.6;
+  text: string,
+  y: number,
+  x: number,
+  maxW: number,
+): number {
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.setTextColor(40);
+  const lines = doc.splitTextToSize(text, maxW);
+  doc.text(lines, x, y);
+  return y + lines.length * 11;
 }
 
-function fiscalAbntTable(doc: jsPDF, state: CursorState, f: FiscalValues) {
-  const v = f.receita_bruta;
-  const pct = (n: number) => (v > 0 ? `${((n / v) * 100).toFixed(2)}%` : "—");
-  const rows: Array<[string, string, string]> = [
-    ["Receita Bruta", fmtBRL(f.receita_bruta), pct(f.receita_bruta)],
-  ];
-  if (f.devolucoes) rows.push(["(−) Devoluções", fmtBRL(-f.devolucoes), pct(-f.devolucoes)]);
-  for (const i of f.impostos_breakdown) {
-    rows.push([`(−) ${i.label}`, fmtBRL(-i.valor), pct(-i.valor)]);
-  }
-  rows.push(["= Receita Líquida", fmtBRL(f.receita_liquida), pct(f.receita_liquida)]);
-  rows.push(["(−) CMV", fmtBRL(-f.cmv), pct(-f.cmv)]);
-  rows.push(["(±) Variação de Estoque", fmtBRL(-f.variacao_estoque), pct(-f.variacao_estoque)]);
-  rows.push(["= Lucro Bruto", fmtBRL(f.lucro_bruto), pct(f.lucro_bruto)]);
-  rows.push(["(−) Despesas Operacionais", fmtBRL(-f.despesas_operacionais), pct(-f.despesas_operacionais)]);
-  rows.push(["= Lucro antes IR/CSLL", fmtBRL(f.lucro_antes_ir), pct(f.lucro_antes_ir)]);
-  if (f.irpj) rows.push(["(−) IRPJ", fmtBRL(-f.irpj), pct(-f.irpj)]);
-  if (f.csll) rows.push(["(−) CSLL", fmtBRL(-f.csll), pct(-f.csll)]);
-  rows.push([
-    "= Resultado Líquido Fiscal",
-    fmtBRL(f.resultado_liquido_fiscal),
-    pct(f.resultado_liquido_fiscal),
-  ]);
-  abntTable(doc, state, rows as unknown as string[][], [0.55, 0.25, 0.2], {
-    header: ["Descrição", "Valor (R$)", "% Receita"],
-    alignRight: [1, 2],
-    boldOn: (r) => r[0].startsWith("="),
+function formulasTable(
+  doc: jsPDF,
+  rows: Array<[string, string]>,
+  y: number,
+  margin: number,
+  pageW: number,
+): number {
+  autoTable(doc, {
+    startY: y,
+    head: [["Linha", "Fórmula / Origem"]],
+    body: rows,
+    styles: { fontSize: 9, cellPadding: 5 },
+    headStyles: { fillColor: PRIMARY, textColor: 255 },
+    columnStyles: { 0: { fontStyle: "bold", cellWidth: 200 } },
+    margin: { left: margin, right: margin },
   });
+  return (doc as any).lastAutoTable.finalY + 16;
 }
 
 function regimeFormulas(regime: RegimeTributario): Array<[string, string]> {
@@ -491,7 +408,7 @@ function regimeFormulas(regime: RegimeTributario): Array<[string, string]> {
       ["PIS", "Base × pis"],
       ["COFINS", "Base × cofins"],
       ["ICMS", "Base × icms"],
-      ["ISS (quando aplicável)", "Base × iss"],
+      ["ISS (se aplicável)", "Base × iss"],
       ["IRPJ", "Base × presuncao_irpj × irpj"],
       ["CSLL", "Base × presuncao_csll × csll"],
     ];
@@ -501,7 +418,7 @@ function regimeFormulas(regime: RegimeTributario): Array<[string, string]> {
     ["PIS", "Base × pis"],
     ["COFINS", "Base × cofins"],
     ["ICMS", "Base × icms"],
-    ["ISS (quando aplicável)", "Base × iss"],
+    ["ISS (se aplicável)", "Base × iss"],
     ["IRPJ", "max(Lucro antes IR, 0) × irpj"],
     ["CSLL", "max(Lucro antes IR, 0) × csll"],
   ];
@@ -532,19 +449,72 @@ function aliquotasRows(
   return rows;
 }
 
+function fiscalTable(
+  doc: jsPDF,
+  f: FiscalValues,
+  y: number,
+  margin: number,
+  primary: [number, number, number],
+): number {
+  const v = f.receita_bruta;
+  const pct = (n: number) => (v > 0 ? `${((n / v) * 100).toFixed(2)}%` : "—");
+  const rows: Array<[string, string, string]> = [
+    ["Receita Bruta", fmtBRL(f.receita_bruta), pct(f.receita_bruta)],
+  ];
+  if (f.devolucoes) rows.push(["(−) Devoluções", fmtBRL(-f.devolucoes), pct(-f.devolucoes)]);
+  for (const i of f.impostos_breakdown) {
+    rows.push([`(−) ${i.label}`, fmtBRL(-i.valor), pct(-i.valor)]);
+  }
+  rows.push(["= Receita Líquida", fmtBRL(f.receita_liquida), pct(f.receita_liquida)]);
+  rows.push(["(−) CMV", fmtBRL(-f.cmv), pct(-f.cmv)]);
+  rows.push(["(±) Variação de Estoque", fmtBRL(-f.variacao_estoque), pct(-f.variacao_estoque)]);
+  rows.push(["= Lucro Bruto", fmtBRL(f.lucro_bruto), pct(f.lucro_bruto)]);
+  rows.push(["(−) Despesas Operacionais", fmtBRL(-f.despesas_operacionais), pct(-f.despesas_operacionais)]);
+  rows.push(["= Lucro antes IR/CSLL", fmtBRL(f.lucro_antes_ir), pct(f.lucro_antes_ir)]);
+  if (f.irpj) rows.push(["(−) IRPJ", fmtBRL(-f.irpj), pct(-f.irpj)]);
+  if (f.csll) rows.push(["(−) CSLL", fmtBRL(-f.csll), pct(-f.csll)]);
+  rows.push([
+    "= Resultado Líquido Fiscal",
+    fmtBRL(f.resultado_liquido_fiscal),
+    pct(f.resultado_liquido_fiscal),
+  ]);
+  autoTable(doc, {
+    startY: y,
+    head: [["Descrição", "Valor", "% Receita"]],
+    body: rows,
+    styles: { fontSize: 9, cellPadding: 5 },
+    headStyles: { fillColor: primary, textColor: 255 },
+    columnStyles: { 1: { halign: "right" }, 2: { halign: "right", cellWidth: 70 } },
+    didParseCell: (data) => {
+      const label = rows[data.row.index]?.[0] ?? "";
+      if (label.startsWith("=")) data.cell.styles.fontStyle = "bold";
+    },
+    margin: { left: margin, right: margin },
+  });
+  return (doc as any).lastAutoTable.finalY + 14;
+}
+
+function ensureSpace(doc: jsPDF, y: number, needed: number, margin: number): number {
+  const h = doc.internal.pageSize.getHeight();
+  if (y + needed > h - margin) {
+    doc.addPage();
+    return margin;
+  }
+  return y;
+}
+
 function field(doc: jsPDF, label: string, x: number, y: number, w: number) {
-  doc.setFontSize(FS_NOTE);
-  doc.setTextColor(80);
-  doc.setFont(FONT, "normal");
+  doc.setFontSize(8);
+  doc.setTextColor(110);
   doc.text(label, x, y);
-  doc.setDrawColor(0);
+  doc.setDrawColor(180);
   doc.setLineWidth(0.4);
-  doc.line(x, y + 16, x + w, y + 16);
+  doc.line(x, y + 14, x + w, y + 14);
   doc.setTextColor(0);
 }
 
-function hr(doc: jsPDF, x1: number, y: number, x2: number) {
-  doc.setDrawColor(0);
+function line(doc: jsPDF, x1: number, y: number, x2: number) {
+  doc.setDrawColor(180);
   doc.setLineWidth(0.4);
   doc.line(x1, y, x2, y);
 }
