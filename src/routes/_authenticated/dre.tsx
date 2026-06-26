@@ -11,7 +11,8 @@ import { fmtBRL, fmtPct, mesNome } from "@/lib/finance";
 import { cn } from "@/lib/utils";
 import { calcularDREFiscal, calcularDREFiscalReal, REGIME_LABEL, type RegimeTributario, type ConfigTributaria } from "@/lib/fiscal";
 import { exportDREPdf, exportDREExcel, type LinhaExport } from "@/lib/export-utils";
-import { FileDown, FileSpreadsheet, Pencil } from "lucide-react";
+import { exportMemorialCalculoPdf } from "@/lib/memorial-export";
+import { FileDown, FileSpreadsheet, Pencil, ScrollText } from "lucide-react";
 import { DreEditor, type DreFormValues, emptyDreValues } from "@/components/DreEditor";
 import { toast } from "sonner";
 
@@ -161,6 +162,31 @@ function DrePage() {
       })),
     });
   }
+  function onMemorial() {
+    exportMemorialCalculoPdf({
+      empresa: empresa?.nome ?? "Empresa",
+      cnpj: empresa?.cnpj ?? null,
+      regime,
+      config: cfg,
+      mes: periodo.mes,
+      ano: periodo.ano,
+      dre: {
+        total_vendas: Number(dre.total_vendas) || 0,
+        devolucoes: Number(dre.devolucoes ?? 0) || 0,
+        cmv: Number(dre.cmv) || 0,
+        variacao_estoque: Number(dre.variacao_estoque) || 0,
+        total_despesas: Number(dre.total_despesas) || 0,
+        estoque_inicial: Number(dre.estoque_inicial_valor ?? 0) || 0,
+        estoque_final: Number(dre.estoque_final_valor ?? 0) || 0,
+        resultado_bruto: Number(dre.resultado_bruto) || 0,
+        resultado_liquido_gerencial:
+          Number(dre.resultado_bruto) - Number(dre.variacao_estoque) - Number(dre.total_despesas),
+      },
+      fiscalEstimado,
+      fiscalReal,
+      temLancamentosReais: (lancamentos?.length ?? 0) > 0,
+    });
+  }
 
   return (
     <div className="space-y-4">
@@ -194,6 +220,9 @@ function DrePage() {
           </Button>
           <Button variant="outline" size="sm" onClick={onXlsx}>
             <FileSpreadsheet className="h-4 w-4 mr-1" /> Excel
+          </Button>
+          <Button variant="outline" size="sm" onClick={onMemorial} title="Relatório técnico das fórmulas para o contador validar">
+            <ScrollText className="h-4 w-4 mr-1" /> Memorial p/ Contador
           </Button>
         </div>
 
