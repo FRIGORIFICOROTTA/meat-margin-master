@@ -1,46 +1,55 @@
+# Relatório de Memorial de Cálculo — DRE Gerencial e Fiscal
 
 ## Objetivo
 
-Resolver dois pontos na tela **Lançamentos Fiscais** (`/fiscal`):
+Gerar um documento PDF "Memorial de Cálculo" que descreve, em linguagem técnica contábil, todas as fórmulas e critérios usados pelo sistema. O contador recebe este PDF e confirma se a lógica está aderente à legislação e ao regime tributário da empresa.
 
-1. Permitir **excluir** qualquer linha de ajuste/tributo — inclusive os "Adicionar ajuste/outro" recém-criados que ainda não foram salvos (hoje o botão de lixeira só aparece quando o registro já existe no banco).
-2. Adicionar uma **explicação prática** de como funciona a parte fiscal e como preencher os valores e as alíquotas, sem precisar de conhecimento contábil prévio.
+## Onde fica no app
 
-## Mudanças (apenas em `src/routes/_authenticated/fiscal.tsx`)
+- Novo botão **"Memorial de Cálculo (PDF)"** na tela `/dre`, ao lado dos botões de exportar PDF/Excel já existentes.
+- Geração 100% client-side com `jsPDF` + `jspdf-autotable` (já instalados em `src/lib/export-utils.ts`).
+- O PDF reflete a empresa e o período selecionados (usa regime tributário e `config_tributaria` reais da empresa), para que o contador veja exatamente as alíquotas aplicadas no caso dele.
 
-### 1. Exclusão de ajustes
+## Conteúdo do PDF
 
-- Botão de lixeira passa a aparecer em **todas as linhas de "outros/ajuste"** (mesmo sem `id`):
-  - Se já tem `id` salvo → chama `deleteMut` (soft-delete no banco, comportamento atual).
-  - Se ainda não foi salvo → remove apenas da lista local (`setRows`).
-- Para tributos padrão do regime (ICMS, PIS, COFINS, IRPJ, CSLL, Simples), a lixeira **não** aparece (eles representam tributos obrigatórios do regime; o usuário zera o valor real se não houver). Se tiverem `id` salvo, mostramos um botão "Limpar" que zera valor/data/observação e remove o registro do banco.
-- Diálogo de confirmação simples (`confirm()` nativo) antes de excluir um registro já salvo, para evitar exclusão acidental.
+Estrutura em seções numeradas, com fórmulas, exemplos numéricos do mês corrente e referências às colunas do banco:
 
-### 2. Guia explicativo
+1. **Identificação** — Grupo, Empresa, CNPJ, Regime Tributário, Período, data de emissão.
+2. **Origem dos dados** — explicação de que valores gerenciais vêm da importação dos PDFs do ERP (DRE + Inventário), revisados pelo usuário antes de persistir.
+3. **DRE Gerencial — fórmulas**
+   - Receita Bruta = `total_vendas`
+   - Devoluções = `devolucoes`
+   - Receita Líquida Gerencial = Receita Bruta − Devoluções
+   - CMV = `cmv` (do ERP)
+   - Variação de Estoque = Estoque Inicial − Estoque Final (convenção: positiva = consumo extra)
+   - **CMV Ajustado = CMV + Variação de Estoque**
+   - Resultado Bruto = Receita Líquida − CMV Ajustado
+   - Despesas Operacionais = soma de `despesas_detalhe.valor`
+   - **Resultado Líquido Gerencial = Resultado Bruto − Despesas**
+4. **DRE Fiscal Estimado — fórmulas por regime**
+   - Base tributável = Receita Bruta − Devoluções
+   - **Simples Nacional**: DAS = Base × `aliquota_simples`
+   - **Lucro Presumido**: PIS, COFINS, ICMS, ISS sobre a Base; IRPJ = Base × presunção_irpj × alíquota_irpj; CSLL análogo
+   - **Lucro Real**: PIS, COFINS, ICMS, ISS sobre a Base; IRPJ/CSLL sobre Lucro antes do IR (se positivo)
+   - Tabela com as alíquotas atualmente configuradas na empresa (lidas de `empresas.config_tributaria` com fallback nos `DEFAULTS` de `src/lib/fiscal.ts`).
+5. **DRE Fiscal Real**
+   - Para cada tributo: se houver lançamento em `lancamentos_fiscais` para o período → usa valor real; senão → mantém estimado.
+   - Ajustes "outros" entram com sinal (+1 despesa / −1 crédito).
+6. **Base operacional unificada** — nota explicando que Gerencial e Fiscal usam a MESMA base (Receita − CMV Ajustado − Despesas) e que a diferença entre os dois resultados é exatamente o bloco de tributos.
+7. **Exemplo numérico do período selecionado** — tabela lado a lado: linha a linha da DRE Gerencial e da DRE Fiscal (Estimado e Real, se houver), com valores e % sobre receita.
+8. **Glossário e premissas** — definição de cada termo, convenção de sinal da variação de estoque, tratamento de subtotais duplicados no parser, política de idempotência na importação.
+9. **Campo de validação do contador** — espaço com linhas para Nome, CRC, Data, Assinatura e parecer ("De acordo / Ajustes necessários").
 
-Adicionar, logo abaixo do cabeçalho da página, um card recolhível **"Como preencher esta tela"** (usando `<details>` ou um `Collapsible` shadcn já disponível), aberto por padrão na primeira visita e fechável. Conteúdo em linguagem simples, dividido em blocos curtos:
+## Detalhes técnicos
 
-- **Para que serve esta tela**: registrar o valor **real** dos impostos pagos no período, para que a DRE Fiscal reflita o resultado verdadeiro (e não só uma estimativa).
-- **De onde vem o "Estimado"**: cálculo automático baseado no regime tributário da empresa (Simples / Presumido / Real) aplicado sobre a Receita ou o Lucro. É só uma referência — o valor que conta é o **Real**.
-- **Como preencher cada tributo** (passo a passo):
-  1. Pegue a guia/DARF/DAS efetivamente paga no mês.
-  2. Digite o valor pago em **Valor Real**. Se quiser usar a estimativa como ponto de partida, clique no botão **=**.
-  3. (Opcional) Informe a data de pagamento e uma observação (nº da guia, parcelamento etc.).
-  4. Clique em **Salvar**.
-- **Ajustes / Outros**: usar para itens não previstos no regime — retenções (INSS, IRRF, ISS retido), créditos tributários, multas, parcelamentos. Escolher o sinal:
-  - **Despesa (+)** → soma aos tributos (reduz o lucro).
-  - **Crédito (−)** → abate dos tributos (aumenta o lucro).
-- **Diferença (coluna)**: mostra `Real − Estimado`. Vermelho = pagou mais que o estimado; verde = pagou menos. Serve de alerta para revisar lançamentos.
-- **Impacto na DRE**: explicar que, ao salvar, a DRE Fiscal no modo **Real** passa a usar esses valores; no modo **Estimado** continua usando o cálculo automático.
-- **Por que Gerencial ≠ Fiscal**: a diferença entre as duas visões corresponde exatamente aos tributos lançados aqui (a base operacional Receita − CMV − Variação − Despesas é a mesma).
-
-### Detalhes visuais
-
-- O guia usa um card discreto com ícone de "informação" e tipografia menor, sem poluir a tela.
-- Estado de aberto/fechado guardado em `localStorage` (`fiscal-help-open`) para respeitar a escolha do usuário entre visitas.
-- A dica curta atual ("clique em = para copiar...") é absorvida pelo guia novo.
+- Novo arquivo `src/lib/memorial-export.ts` exportando `exportMemorialCalculoPdf(opts)`.
+- `opts` recebe: dados da empresa (nome, cnpj, regime, config_tributaria), período (mes/ano), e o DRE do período (gerencial + fiscal estimado + fiscal real já calculados pela página).
+- Em `src/routes/_authenticated/dre.tsx`: adicionar handler que reaproveita os dados já carregados na rota e chama o novo export.
+- Sem migrações de banco. Sem mudança nas fórmulas existentes — apenas documenta o que já está em `src/lib/fiscal.ts` e na rota da DRE.
+- Nome do arquivo: `Memorial_Calculo_DRE_<empresa>_<mes>-<ano>.pdf`.
 
 ## Fora de escopo
 
-- Sem mudanças no schema do banco, no cálculo fiscal (`src/lib/fiscal.ts`) ou na DRE.
-- Sem mudanças nas demais rotas.
+- Não altera cálculos.
+- Não adiciona campos no banco.
+- Não envia e-mail ao contador (apenas gera o PDF para o usuário baixar e encaminhar).
