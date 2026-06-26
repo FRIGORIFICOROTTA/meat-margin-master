@@ -162,6 +162,31 @@ function DrePage() {
       })),
     });
   }
+  function onMemorial() {
+    exportMemorialCalculoPdf({
+      empresa: empresa?.nome ?? "Empresa",
+      cnpj: empresa?.cnpj ?? null,
+      regime,
+      config: cfg,
+      mes: periodo.mes,
+      ano: periodo.ano,
+      dre: {
+        total_vendas: Number(dre.total_vendas) || 0,
+        devolucoes: Number(dre.devolucoes ?? 0) || 0,
+        cmv: Number(dre.cmv) || 0,
+        variacao_estoque: Number(dre.variacao_estoque) || 0,
+        total_despesas: Number(dre.total_despesas) || 0,
+        estoque_inicial: Number(dre.estoque_inicial_valor ?? 0) || 0,
+        estoque_final: Number(dre.estoque_final_valor ?? 0) || 0,
+        resultado_bruto: Number(dre.resultado_bruto) || 0,
+        resultado_liquido_gerencial:
+          Number(dre.resultado_bruto) - Number(dre.variacao_estoque) - Number(dre.total_despesas),
+      },
+      fiscalEstimado,
+      fiscalReal,
+      temLancamentosReais: (lancamentos?.length ?? 0) > 0,
+    });
+  }
 
   return (
     <div className="space-y-4">
