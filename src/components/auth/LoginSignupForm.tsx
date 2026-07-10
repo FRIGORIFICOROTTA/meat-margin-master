@@ -15,30 +15,35 @@ interface LoginSignupFormProps {
 function friendlyAuthError(message: string): string {
   const m = message.toLowerCase();
   if (m.includes("invalid login")) return "Email ou senha incorretos.";
-  if (m.includes("user already registered")) return "Este email já está cadastrado. Faça login.";
-  if (m.includes("email not confirmed")) return "Confirme seu email antes de entrar.";
+  if (m.includes("user already registered") || m.includes("already been registered"))
+    return "Este email já está cadastrado. Use 'Entrar' ou 'Esqueceu a senha?'.";
+  if (m.includes("email not confirmed"))
+    return "Confirme seu email antes de entrar. Verifique sua caixa de entrada.";
   if (m.includes("provider is not enabled"))
     return "Login com Google ainda não está ativado no Supabase.";
+  if (m.includes("rate limit") || m.includes("too many"))
+    return "Muitas tentativas. Aguarde alguns minutos e tente novamente.";
   return message;
 }
 
 const NOT_ALLOWED_MSG =
-  "Este email não está autorizado a acessar o sistema. Peça ao administrador para liberar seu acesso.";
+  "Este email não está autorizado. Peça ao administrador para liberar seu acesso em Configurações → Acessos.";
+
+type Status =
+  | { kind: "idle" }
+  | { kind: "error"; msg: string }
+  | { kind: "success"; msg: string }
+  | { kind: "info"; msg: string };
 
 const LoginSignupForm = ({ nextPath }: LoginSignupFormProps) => {
   const router = useRouter();
   const [tab, setTab] = useState<"login" | "register">("login");
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+  const [status, setStatus] = useState<Status>({ kind: "idle" });
+  const [pendingConfirmEmail, setPendingConfirmEmail] = useState<string | null>(null);
 
   const checkAllowedFn = useServerFn(checkEmailAllowed);
-  const getGoogleCfgFn = useServerFn(getGoogleOAuthConfig);
-
-  const googleCfgQ = useQuery({
-    queryKey: ["google-oauth-config-public"],
-    queryFn: () => getGoogleCfgFn(),
-  });
-  const googleEnabled = !!googleCfgQ.data?.enabled;
 
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
