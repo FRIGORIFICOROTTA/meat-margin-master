@@ -39,8 +39,14 @@ function ConfigPage() {
     queryKey: ["meu-grupo", user?.id],
     enabled: !!user,
     queryFn: async () => {
-      const { data } = await supabase.from("grupos").select("*").eq("owner_id", user!.id).maybeSingle();
-      return data;
+      const { data, error } = await supabase
+        .from("grupos")
+        .select("*")
+        .eq("owner_id", user!.id)
+        .order("created_at", { ascending: true })
+        .limit(1);
+      if (error) throw error;
+      return data?.[0] ?? null;
     },
   });
 
