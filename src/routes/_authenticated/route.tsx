@@ -15,6 +15,8 @@ import {
 import { MESES } from "@/lib/finance";
 import { Toaster } from "sonner";
 import { LayoutDashboard, Upload, FileBarChart2, Boxes, Settings, LogOut, Receipt, Landmark } from "lucide-react";
+import { BrandLogo } from "@/components/brand/BrandLogo";
+import { Watermark } from "@/components/brand/Watermark";
 
 export const Route = createFileRoute("/_authenticated")({
   ssr: false,
@@ -84,17 +86,18 @@ function AuthLayout() {
   const anos = Array.from({ length: 6 }, (_, i) => new Date().getFullYear() - i);
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="relative min-h-screen bg-background">
+      <Watermark />
       <Toaster richColors position="top-right" />
-      <header className="sticky top-0 z-30 border-b bg-card/95 backdrop-blur">
+      <header className="sticky top-0 z-30 border-b bg-sidebar text-sidebar-foreground backdrop-blur">
         <div className="mx-auto flex max-w-7xl items-center gap-4 px-4 py-3">
           <Link to="/dashboard" className="flex items-center gap-2">
-            <div className="grid h-9 w-9 place-items-center rounded-md bg-primary text-primary-foreground font-bold">
-              R
+            <div className="grid h-10 w-10 place-items-center rounded-md bg-black/30 p-1">
+              <BrandLogo className="h-full w-full" />
             </div>
             <div className="hidden sm:block">
               <div className="text-sm font-semibold leading-tight">Rota das Carnes</div>
-              <div className="text-xs text-muted-foreground leading-tight">DRE Inteligente</div>
+              <div className="text-xs opacity-70 leading-tight">DRE Inteligente</div>
             </div>
           </Link>
 
@@ -176,7 +179,7 @@ function AuthLayout() {
           </div>
         </div>
       </header>
-      <main className="mx-auto max-w-7xl px-4 py-6">
+      <main className="relative z-10 mx-auto max-w-7xl px-4 py-6">
         <Outlet />
       </main>
     </div>
@@ -195,8 +198,8 @@ function NavLink({
   return (
     <Link
       to={to}
-      activeProps={{ className: "bg-secondary text-secondary-foreground" }}
-      className="inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium text-muted-foreground hover:bg-secondary hover:text-secondary-foreground transition-colors"
+      activeProps={{ className: "bg-sidebar-accent text-sidebar-primary" }}
+      className="inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground transition-colors"
     >
       {icon}
       {children}

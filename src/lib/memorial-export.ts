@@ -325,10 +325,33 @@ export function exportMemorialCalculoPdf(opts: MemorialOpts) {
   y += 16;
   line(doc, margin, y, pageW - margin);
 
-  // ---------- Rodapé ----------
+  // ---------- Rodapé + Marca d'água ----------
   const total = doc.getNumberOfPages();
   for (let i = 1; i <= total; i++) {
     doc.setPage(i);
+
+    // Marca d'água diagonal discreta "ROTA DAS CARNES" no centro da página
+    const anyDoc = doc as unknown as {
+      GState?: new (opts: { opacity: number }) => unknown;
+      setGState?: (g: unknown) => void;
+    };
+    if (anyDoc.GState && anyDoc.setGState) {
+      const gs = new anyDoc.GState({ opacity: 0.06 });
+      anyDoc.setGState(gs);
+    }
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(72);
+    doc.setTextColor(...PRIMARY);
+    doc.text("ROTA DAS CARNES", pageW / 2, pageH / 2, {
+      align: "center",
+      angle: 30,
+    });
+    if (anyDoc.GState && anyDoc.setGState) {
+      anyDoc.setGState(new anyDoc.GState({ opacity: 1 }));
+    }
+
+    // Rodapé
+    doc.setFont("helvetica", "normal");
     doc.setFontSize(8);
     doc.setTextColor(150);
     doc.text(
