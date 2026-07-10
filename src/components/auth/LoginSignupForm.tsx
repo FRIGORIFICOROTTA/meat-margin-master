@@ -279,11 +279,52 @@ const LoginSignupForm = ({ nextPath }: LoginSignupFormProps) => {
           </h1>
         </div>
 
+        {pendingConfirmEmail ? (
+          <div className="space-y-4">
+            <div className="text-center space-y-3 py-4">
+              <div className="mx-auto w-14 h-14 rounded-full bg-emerald-500/10 border border-emerald-500/40 flex items-center justify-center">
+                <MailCheck className="h-7 w-7 text-emerald-400" />
+              </div>
+              <h2 className="text-white font-bold text-lg">Confirme seu email</h2>
+              <p className="text-zinc-400 text-sm leading-relaxed">
+                Enviamos um link de confirmação para
+                <br />
+                <strong className="text-white break-all">{pendingConfirmEmail}</strong>
+              </p>
+              <p className="text-zinc-500 text-xs">
+                Clique no link do email para ativar sua conta. Verifique também a caixa de spam.
+              </p>
+            </div>
+            {statusBanner}
+            <button
+              type="button"
+              onClick={handleResendConfirmation}
+              disabled={loading}
+              className="w-full bg-[#c8102e] hover:bg-[#a60d26] disabled:opacity-60 text-white font-bold py-3.5 rounded-xl transition-all shadow-[0_0_24px_rgba(200,16,46,0.28)] active:scale-[0.98] flex items-center justify-center gap-2"
+            >
+              {loading && <Loader2 className="h-4 w-4 animate-spin" />}
+              {loading ? "Enviando..." : "Reenviar email de confirmação"}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setPendingConfirmEmail(null);
+                setStatus({ kind: "idle" });
+                setTab("login");
+                setLoginEmail(regEmail);
+              }}
+              className="w-full bg-transparent border border-zinc-800 hover:bg-zinc-900 text-white font-medium py-3 rounded-xl transition-all"
+            >
+              Voltar para login
+            </button>
+          </div>
+        ) : (
+        <>
         {/* Toggle Entrar / Cadastrar */}
         <div className="bg-zinc-900/50 p-1 rounded-full flex mb-8 border border-zinc-800/50">
           <button
             type="button"
-            onClick={() => setTab("login")}
+            onClick={() => { setTab("login"); setStatus({ kind: "idle" }); }}
             className={`flex-1 py-2 text-sm font-semibold rounded-full transition-all ${
               tab === "login"
                 ? "bg-zinc-800 text-white shadow-lg"
@@ -294,7 +335,7 @@ const LoginSignupForm = ({ nextPath }: LoginSignupFormProps) => {
           </button>
           <button
             type="button"
-            onClick={() => setTab("register")}
+            onClick={() => { setTab("register"); setStatus({ kind: "idle" }); }}
             className={`flex-1 py-2 text-sm font-semibold rounded-full transition-all ${
               tab === "register"
                 ? "bg-zinc-800 text-white shadow-lg"
@@ -305,7 +346,10 @@ const LoginSignupForm = ({ nextPath }: LoginSignupFormProps) => {
           </button>
         </div>
 
+        {statusBanner}
+
         {tab === "login" ? (
+
           <form onSubmit={handleLogin} className="space-y-4">
             <div className="space-y-1.5">
               <label htmlFor="login-email" className={labelCls}>Email</label>
