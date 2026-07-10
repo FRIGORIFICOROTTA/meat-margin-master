@@ -173,7 +173,7 @@ const LoginSignupForm = ({ nextPath }: LoginSignupFormProps) => {
         <img
           src={BRAND_LOGO_URL}
           alt=""
-          className="w-[min(80vw,720px)] h-auto opacity-[0.045]"
+          className="w-[min(110vw,1200px)] h-auto opacity-[0.05]"
           style={{ mixBlendMode: "luminosity" }}
         />
       </div>
@@ -181,7 +181,7 @@ const LoginSignupForm = ({ nextPath }: LoginSignupFormProps) => {
       {/* Glow radial vermelho */}
       <div
         aria-hidden
-        className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-[#c8102e] rounded-full blur-[160px] opacity-[0.05]"
+        className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[700px] h-[700px] bg-[#c8102e] rounded-full blur-[180px] opacity-[0.06]"
       />
 
       {/* Vinheta escura nas bordas */}
@@ -196,8 +196,17 @@ const LoginSignupForm = ({ nextPath }: LoginSignupFormProps) => {
 
       <div className="relative z-10 w-full max-w-[400px]">
         {/* Header */}
-        <div className="text-center mb-10">
-          <p className="text-[#c8102e] text-[10px] font-bold tracking-[0.3em] uppercase mb-3">
+        <div className="text-center mb-10 flex flex-col items-center">
+          <div
+            className="w-24 h-24 rounded-full bg-zinc-900/70 border border-[#c8102e]/30 shadow-[0_0_40px_rgba(200,16,46,0.28)] flex items-center justify-center overflow-hidden mb-5 backdrop-blur-sm"
+          >
+            <img
+              src={BRAND_LOGO_URL}
+              alt="Rota das Carnes"
+              className="w-full h-full object-contain p-1"
+            />
+          </div>
+          <p className="text-[#c8102e] text-[10px] font-bold tracking-[0.3em] uppercase mb-2">
             DRE Inteligente
           </p>
           <h1 className="text-white font-bold tracking-tight text-2xl uppercase">
