@@ -1,13 +1,12 @@
 import { useState, FormEvent, useEffect } from "react";
 import { useRouter } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { Loader2, ShieldAlert } from "lucide-react";
-import { toast } from "sonner";
+import { Loader2, ShieldAlert, MailCheck, AlertCircle, CheckCircle2 } from "lucide-react";
+import { Toaster, toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { GoogleIcon } from "@/components/auth/GoogleIcon";
 import { BRAND_LOGO_URL } from "@/components/brand/BrandLogo";
-import { checkEmailAllowed, getGoogleOAuthConfig } from "@/lib/auth-allowlist.functions";
+import { checkEmailAllowed } from "@/lib/auth-allowlist.functions";
 
 interface LoginSignupFormProps {
   nextPath?: string;
