@@ -202,8 +202,34 @@ const LoginSignupForm = ({ nextPath }: LoginSignupFormProps) => {
   const labelCls =
     "text-[11px] font-semibold text-zinc-400 ml-1 uppercase tracking-wider";
 
+  const statusBanner =
+    status.kind === "idle" ? null : (
+      <div
+        role={status.kind === "error" ? "alert" : "status"}
+        aria-live="polite"
+        className={`flex items-start gap-2.5 rounded-xl border px-3.5 py-3 text-[13px] leading-relaxed mb-4 ${
+          status.kind === "error"
+            ? "bg-[#c8102e]/10 border-[#c8102e]/40 text-red-200"
+            : status.kind === "success"
+            ? "bg-emerald-500/10 border-emerald-500/40 text-emerald-200"
+            : "bg-sky-500/10 border-sky-500/40 text-sky-200"
+        }`}
+      >
+        {status.kind === "error" ? (
+          <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+        ) : status.kind === "success" ? (
+          <CheckCircle2 className="h-4 w-4 mt-0.5 shrink-0" />
+        ) : (
+          <MailCheck className="h-4 w-4 mt-0.5 shrink-0" />
+        )}
+        <span>{status.msg}</span>
+      </div>
+    );
+
   return (
     <div className="relative min-h-screen w-full bg-[#050505] flex items-center justify-center p-6 overflow-hidden">
+      <Toaster richColors position="top-center" theme="dark" />
+
       {/* Marca d'água: logo real */}
       <div
         aria-hidden
