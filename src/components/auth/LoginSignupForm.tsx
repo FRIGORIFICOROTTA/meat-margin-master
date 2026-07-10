@@ -1,13 +1,12 @@
 import { useState, FormEvent, useEffect } from "react";
 import { useRouter } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { Loader2, ShieldAlert } from "lucide-react";
-import { toast } from "sonner";
+import { Loader2, ShieldAlert, MailCheck, AlertCircle, CheckCircle2 } from "lucide-react";
+import { Toaster, toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { GoogleIcon } from "@/components/auth/GoogleIcon";
 import { BRAND_LOGO_URL } from "@/components/brand/BrandLogo";
-import { checkEmailAllowed, getGoogleOAuthConfig } from "@/lib/auth-allowlist.functions";
+import { checkEmailAllowed } from "@/lib/auth-allowlist.functions";
 
 interface LoginSignupFormProps {
   nextPath?: string;
@@ -16,30 +15,35 @@ interface LoginSignupFormProps {
 function friendlyAuthError(message: string): string {
   const m = message.toLowerCase();
   if (m.includes("invalid login")) return "Email ou senha incorretos.";
-  if (m.includes("user already registered")) return "Este email já está cadastrado. Faça login.";
-  if (m.includes("email not confirmed")) return "Confirme seu email antes de entrar.";
+  if (m.includes("user already registered") || m.includes("already been registered"))
+    return "Este email já está cadastrado. Use 'Entrar' ou 'Esqueceu a senha?'.";
+  if (m.includes("email not confirmed"))
+    return "Confirme seu email antes de entrar. Verifique sua caixa de entrada.";
   if (m.includes("provider is not enabled"))
     return "Login com Google ainda não está ativado no Supabase.";
+  if (m.includes("rate limit") || m.includes("too many"))
+    return "Muitas tentativas. Aguarde alguns minutos e tente novamente.";
   return message;
 }
 
 const NOT_ALLOWED_MSG =
-  "Este email não está autorizado a acessar o sistema. Peça ao administrador para liberar seu acesso.";
+  "Este email não está autorizado. Peça ao administrador para liberar seu acesso em Configurações → Acessos.";
+
+type Status =
+  | { kind: "idle" }
+  | { kind: "error"; msg: string }
+  | { kind: "success"; msg: string }
+  | { kind: "info"; msg: string };
 
 const LoginSignupForm = ({ nextPath }: LoginSignupFormProps) => {
   const router = useRouter();
   const [tab, setTab] = useState<"login" | "register">("login");
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+  const [status, setStatus] = useState<Status>({ kind: "idle" });
+  const [pendingConfirmEmail, setPendingConfirmEmail] = useState<string | null>(null);
 
   const checkAllowedFn = useServerFn(checkEmailAllowed);
-  const getGoogleCfgFn = useServerFn(getGoogleOAuthConfig);
-
-  const googleCfgQ = useQuery({
-    queryKey: ["google-oauth-config-public"],
-    queryFn: () => getGoogleCfgFn(),
-  });
-  const googleEnabled = !!googleCfgQ.data?.enabled;
 
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
@@ -62,11 +66,25 @@ const LoginSignupForm = ({ nextPath }: LoginSignupFormProps) => {
       const { allowed } = await checkAllowedFn({ data: { email } });
       if (!allowed) {
         await supabase.auth.signOut();
+        setStatus({ kind: "error", msg: NOT_ALLOWED_MSG });
         toast.error(NOT_ALLOWED_MSG);
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  function showError(msg: string) {
+    setStatus({ kind: "error", msg });
+    toast.error(msg);
+  }
+  function showSuccess(msg: string) {
+    setStatus({ kind: "success", msg });
+    toast.success(msg);
+  }
+  function showInfo(msg: string) {
+    setStatus({ kind: "info", msg });
+    toast.info(msg);
+  }
 
   async function assertAllowed(email: string): Promise<boolean> {
     try {
@@ -79,10 +97,11 @@ const LoginSignupForm = ({ nextPath }: LoginSignupFormProps) => {
 
   const handleLogin = async (e: FormEvent) => {
     e.preventDefault();
+    setStatus({ kind: "idle" });
     setLoading(true);
     const allowed = await assertAllowed(loginEmail);
     if (!allowed) {
-      toast.error(NOT_ALLOWED_MSG);
+      showError(NOT_ALLOWED_MSG);
       setLoading(false);
       return;
     }
@@ -91,19 +110,21 @@ const LoginSignupForm = ({ nextPath }: LoginSignupFormProps) => {
       password: loginPassword,
     });
     if (error) {
-      toast.error(friendlyAuthError(error.message));
+      showError(friendlyAuthError(error.message));
       setLoading(false);
     } else {
+      showSuccess("Login efetuado! Redirecionando...");
       router.navigate({ to: postLoginTarget });
     }
   };
 
   const handleSignup = async (e: FormEvent) => {
     e.preventDefault();
+    setStatus({ kind: "idle" });
     setLoading(true);
     const allowed = await assertAllowed(regEmail);
     if (!allowed) {
-      toast.error(NOT_ALLOWED_MSG);
+      showError(NOT_ALLOWED_MSG);
       setLoading(false);
       return;
     }
@@ -115,45 +136,63 @@ const LoginSignupForm = ({ nextPath }: LoginSignupFormProps) => {
         data: regName ? { full_name: regName } : undefined,
       },
     });
+    setLoading(false);
     if (error) {
-      toast.error(friendlyAuthError(error.message));
-      setLoading(false);
+      showError(friendlyAuthError(error.message));
       return;
     }
     if (data.session) {
-      toast.success("Conta criada com sucesso!");
+      showSuccess("Conta criada! Vamos configurar sua empresa.");
       router.navigate({ to: "/onboarding" });
     } else {
-      toast.success("Verifique seu email para confirmar o cadastro.");
-      setLoading(false);
+      setPendingConfirmEmail(regEmail);
+      showInfo(`Enviamos um link de confirmação para ${regEmail}.`);
+    }
+  };
+
+  const handleResendConfirmation = async () => {
+    if (!pendingConfirmEmail) return;
+    setLoading(true);
+    const { error } = await supabase.auth.resend({
+      type: "signup",
+      email: pendingConfirmEmail,
+      options: { emailRedirectTo: absoluteTarget },
+    });
+    setLoading(false);
+    if (error) {
+      showError(friendlyAuthError(error.message));
+    } else {
+      showSuccess("Novo link enviado. Verifique seu email (e a caixa de spam).");
     }
   };
 
   const handleForgotPassword = async () => {
+    setStatus({ kind: "idle" });
     if (!loginEmail || !loginEmail.includes("@")) {
-      toast.error("Digite seu email no campo acima para recuperar a senha.");
+      showError("Digite seu email no campo acima para recuperar a senha.");
       return;
     }
     setLoading(true);
     const { error } = await supabase.auth.resetPasswordForEmail(loginEmail, {
       redirectTo: `${window.location.origin}/definir-senha`,
     });
-    if (error) {
-      toast.error(friendlyAuthError(error.message));
-    } else {
-      toast.success("Enviamos um link para você redefinir sua senha. Verifique seu email.");
-    }
     setLoading(false);
+    if (error) {
+      showError(friendlyAuthError(error.message));
+    } else {
+      showSuccess("Enviamos um link para redefinir sua senha. Verifique seu email.");
+    }
   };
 
   const handleGoogleLogin = async () => {
+    setStatus({ kind: "idle" });
     setGoogleLoading(true);
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: { redirectTo: absoluteTarget },
     });
     if (error) {
-      toast.error(friendlyAuthError(error.message));
+      showError(friendlyAuthError(error.message));
       setGoogleLoading(false);
     }
   };
@@ -163,8 +202,34 @@ const LoginSignupForm = ({ nextPath }: LoginSignupFormProps) => {
   const labelCls =
     "text-[11px] font-semibold text-zinc-400 ml-1 uppercase tracking-wider";
 
+  const statusBanner =
+    status.kind === "idle" ? null : (
+      <div
+        role={status.kind === "error" ? "alert" : "status"}
+        aria-live="polite"
+        className={`flex items-start gap-2.5 rounded-xl border px-3.5 py-3 text-[13px] leading-relaxed mb-4 ${
+          status.kind === "error"
+            ? "bg-[#c8102e]/10 border-[#c8102e]/40 text-red-200"
+            : status.kind === "success"
+            ? "bg-emerald-500/10 border-emerald-500/40 text-emerald-200"
+            : "bg-sky-500/10 border-sky-500/40 text-sky-200"
+        }`}
+      >
+        {status.kind === "error" ? (
+          <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+        ) : status.kind === "success" ? (
+          <CheckCircle2 className="h-4 w-4 mt-0.5 shrink-0" />
+        ) : (
+          <MailCheck className="h-4 w-4 mt-0.5 shrink-0" />
+        )}
+        <span>{status.msg}</span>
+      </div>
+    );
+
   return (
     <div className="relative min-h-screen w-full bg-[#050505] flex items-center justify-center p-6 overflow-hidden">
+      <Toaster richColors position="top-center" theme="dark" />
+
       {/* Marca d'água: logo real */}
       <div
         aria-hidden
@@ -214,11 +279,52 @@ const LoginSignupForm = ({ nextPath }: LoginSignupFormProps) => {
           </h1>
         </div>
 
+        {pendingConfirmEmail ? (
+          <div className="space-y-4">
+            <div className="text-center space-y-3 py-4">
+              <div className="mx-auto w-14 h-14 rounded-full bg-emerald-500/10 border border-emerald-500/40 flex items-center justify-center">
+                <MailCheck className="h-7 w-7 text-emerald-400" />
+              </div>
+              <h2 className="text-white font-bold text-lg">Confirme seu email</h2>
+              <p className="text-zinc-400 text-sm leading-relaxed">
+                Enviamos um link de confirmação para
+                <br />
+                <strong className="text-white break-all">{pendingConfirmEmail}</strong>
+              </p>
+              <p className="text-zinc-500 text-xs">
+                Clique no link do email para ativar sua conta. Verifique também a caixa de spam.
+              </p>
+            </div>
+            {statusBanner}
+            <button
+              type="button"
+              onClick={handleResendConfirmation}
+              disabled={loading}
+              className="w-full bg-[#c8102e] hover:bg-[#a60d26] disabled:opacity-60 text-white font-bold py-3.5 rounded-xl transition-all shadow-[0_0_24px_rgba(200,16,46,0.28)] active:scale-[0.98] flex items-center justify-center gap-2"
+            >
+              {loading && <Loader2 className="h-4 w-4 animate-spin" />}
+              {loading ? "Enviando..." : "Reenviar email de confirmação"}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setPendingConfirmEmail(null);
+                setStatus({ kind: "idle" });
+                setTab("login");
+                setLoginEmail(regEmail);
+              }}
+              className="w-full bg-transparent border border-zinc-800 hover:bg-zinc-900 text-white font-medium py-3 rounded-xl transition-all"
+            >
+              Voltar para login
+            </button>
+          </div>
+        ) : (
+        <>
         {/* Toggle Entrar / Cadastrar */}
         <div className="bg-zinc-900/50 p-1 rounded-full flex mb-8 border border-zinc-800/50">
           <button
             type="button"
-            onClick={() => setTab("login")}
+            onClick={() => { setTab("login"); setStatus({ kind: "idle" }); }}
             className={`flex-1 py-2 text-sm font-semibold rounded-full transition-all ${
               tab === "login"
                 ? "bg-zinc-800 text-white shadow-lg"
@@ -229,7 +335,7 @@ const LoginSignupForm = ({ nextPath }: LoginSignupFormProps) => {
           </button>
           <button
             type="button"
-            onClick={() => setTab("register")}
+            onClick={() => { setTab("register"); setStatus({ kind: "idle" }); }}
             className={`flex-1 py-2 text-sm font-semibold rounded-full transition-all ${
               tab === "register"
                 ? "bg-zinc-800 text-white shadow-lg"
@@ -240,7 +346,10 @@ const LoginSignupForm = ({ nextPath }: LoginSignupFormProps) => {
           </button>
         </div>
 
+        {statusBanner}
+
         {tab === "login" ? (
+
           <form onSubmit={handleLogin} className="space-y-4">
             <div className="space-y-1.5">
               <label htmlFor="login-email" className={labelCls}>Email</label>
@@ -388,6 +497,10 @@ const LoginSignupForm = ({ nextPath }: LoginSignupFormProps) => {
             </button>
           </form>
         )}
+        </>
+        )}
+
+
 
         {/* Aviso de acesso restrito */}
         <div className="mt-12 flex flex-col items-center gap-3">
