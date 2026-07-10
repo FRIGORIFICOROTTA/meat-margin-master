@@ -2,15 +2,11 @@ import { useState, FormEvent, useEffect } from "react";
 import { useRouter } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { User, Lock, Mail, AlertTriangle, ShieldCheck, Loader2 } from "lucide-react";
+import { Loader2, ShieldAlert } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { GoogleIcon } from "@/components/auth/GoogleIcon";
-import { BRAND_LOGO_URL, BrandLogo } from "@/components/brand/BrandLogo";
+import { BRAND_LOGO_URL } from "@/components/brand/BrandLogo";
 import { checkEmailAllowed, getGoogleOAuthConfig } from "@/lib/auth-allowlist.functions";
 
 interface LoginSignupFormProps {
@@ -45,24 +41,19 @@ const LoginSignupForm = ({ nextPath }: LoginSignupFormProps) => {
   });
   const googleEnabled = !!googleCfgQ.data?.enabled;
 
-  // login state
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
-
-  // register state
   const [regName, setRegName] = useState("");
   const [regEmail, setRegEmail] = useState("");
   const [regPassword, setRegPassword] = useState("");
 
-  const postLoginTarget = nextPath && nextPath.startsWith("/") && !nextPath.startsWith("//")
-    ? nextPath
-    : "/dashboard";
-  const absoluteTarget = typeof window !== "undefined"
-    ? `${window.location.origin}${postLoginTarget}`
-    : postLoginTarget;
+  const postLoginTarget =
+    nextPath && nextPath.startsWith("/") && !nextPath.startsWith("//")
+      ? nextPath
+      : "/dashboard";
+  const absoluteTarget =
+    typeof window !== "undefined" ? `${window.location.origin}${postLoginTarget}` : postLoginTarget;
 
-  // Gate pós-OAuth: se o usuário chega já logado (retorno do Google) e o email
-  // não está autorizado, faz signOut imediatamente.
   useEffect(() => {
     (async () => {
       const { data } = await supabase.auth.getSession();
@@ -165,252 +156,250 @@ const LoginSignupForm = ({ nextPath }: LoginSignupFormProps) => {
       toast.error(friendlyAuthError(error.message));
       setGoogleLoading(false);
     }
-    // Sucesso: navegador redireciona para o Google.
   };
 
-  const googleButton = googleEnabled ? (
-    <div className="mt-5">
-      <div className="relative my-4">
-        <div className="absolute inset-0 flex items-center">
-          <span className="w-full border-t border-border" />
-        </div>
-        <div className="relative flex justify-center">
-          <span className="bg-card px-3 text-xs text-muted-foreground">ou</span>
-        </div>
-      </div>
-      <Button
-        type="button"
-        variant="outline"
-        className="w-full gap-2"
-        onClick={handleGoogleLogin}
-        disabled={googleLoading}
-      >
-        {googleLoading ? (
-          <Loader2 className="h-4 w-4 animate-spin" />
-        ) : (
-          <GoogleIcon className="h-4 w-4" />
-        )}
-        Continuar com Google
-      </Button>
-    </div>
-  ) : null;
+  const inputCls =
+    "w-full bg-zinc-900/40 border border-zinc-800 text-white px-4 py-3 rounded-xl focus:outline-none focus:border-[#c8102e]/60 focus:ring-1 focus:ring-[#c8102e]/60 transition-all placeholder:text-zinc-600 text-sm";
+  const labelCls =
+    "text-[11px] font-semibold text-zinc-400 ml-1 uppercase tracking-wider";
 
   return (
-    <div
-      className="relative min-h-screen w-full flex items-center justify-center p-4 sm:p-6"
-      style={{
-        backgroundColor: "#0a0a0a",
-        backgroundImage: `url(${BRAND_LOGO_URL})`,
-        backgroundRepeat: "no-repeat",
-        backgroundPosition: "center",
-        backgroundSize: "min(70vh, 700px)",
-      }}
-    >
-      {/* Overlay escuro para reduzir o brilho do fundo */}
+    <div className="relative min-h-screen w-full bg-[#050505] flex items-center justify-center p-6 overflow-hidden">
+      {/* Marca d'água: logo real */}
       <div
         aria-hidden
-        className="absolute inset-0"
-        style={{ backgroundColor: "rgba(10,10,10,0.88)" }}
+        className="pointer-events-none select-none absolute inset-0 flex items-center justify-center"
+      >
+        <img
+          src={BRAND_LOGO_URL}
+          alt=""
+          className="w-[min(80vw,720px)] h-auto opacity-[0.045]"
+          style={{ mixBlendMode: "luminosity" }}
+        />
+      </div>
+
+      {/* Glow radial vermelho */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-[#c8102e] rounded-full blur-[160px] opacity-[0.05]"
       />
-      <div className="relative z-10 w-full max-w-5xl space-y-5">
-        <div className="grid overflow-hidden rounded-2xl border border-border bg-card shadow-2xl lg:grid-cols-2">
-          {/* Brand panel */}
-          <div className="relative hidden flex-col justify-between bg-sidebar p-10 text-sidebar-foreground lg:flex">
-            <div
-              aria-hidden
-              className="pointer-events-none absolute inset-0 opacity-90"
-              style={{
-                background:
-                  "radial-gradient(120% 120% at 0% 0%, hsl(var(--primary) / 0.35) 0%, transparent 55%), radial-gradient(120% 120% at 100% 100%, hsl(var(--warning, var(--primary)) / 0.22) 0%, transparent 55%)",
-              }}
-            />
-            <div className="relative z-10 flex items-center gap-3">
-              <BrandLogo className="h-12 w-12" />
-              <div className="leading-tight">
-                <p className="text-sm font-semibold">Rota das Carnes</p>
-                <p className="text-xs opacity-80">DRE Inteligente</p>
-              </div>
-            </div>
 
-            <div className="relative z-10 flex flex-col items-center gap-6 py-6">
-              <BrandLogo className="h-48 w-48 drop-shadow-2xl" />
-              <div className="space-y-3 text-center">
-                <h2 className="text-2xl font-semibold leading-tight">
-                  Gestão financeira completa para o seu negócio.
-                </h2>
-                <p className="mx-auto max-w-sm text-sm opacity-80">
-                  DRE Gerencial, Fiscal, controle de estoque e análise por período —
-                  em um só lugar.
-                </p>
-              </div>
-            </div>
+      {/* Vinheta escura nas bordas */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0"
+        style={{
+          background:
+            "radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,0.7) 100%)",
+        }}
+      />
 
-            <div className="relative z-10 flex items-center gap-2 text-xs opacity-80">
-              <ShieldCheck className="h-4 w-4" />
-              Acesso protegido e dados criptografados
-            </div>
-          </div>
-
-          {/* Form panel */}
-          <div className="flex flex-col justify-center p-8 sm:p-10">
-            {/* Mobile brand */}
-            <div className="mb-6 flex items-center gap-3 lg:hidden">
-              <BrandLogo className="h-10 w-10" />
-              <div className="leading-tight">
-                <p className="text-sm font-semibold text-foreground">Rota das Carnes</p>
-                <p className="text-xs text-muted-foreground">DRE Inteligente</p>
-              </div>
-            </div>
-
-            <Tabs value={tab} onValueChange={(v) => setTab(v as "login" | "register")}>
-              <TabsList className="grid w-full grid-cols-2">
-                <TabsTrigger value="login">Entrar</TabsTrigger>
-                <TabsTrigger value="register">Cadastrar</TabsTrigger>
-              </TabsList>
-
-              {/* Login */}
-              <TabsContent value="login" className="mt-6">
-                <div className="mb-6 space-y-1">
-                  <h1 className="text-2xl font-semibold text-foreground">Bem-vindo de volta</h1>
-                  <p className="text-sm text-muted-foreground">
-                    Acesse sua conta para continuar.
-                  </p>
-                </div>
-                <form onSubmit={handleLogin} className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="login-email">Email</Label>
-                    <div className="relative">
-                      <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                      <Input
-                        id="login-email"
-                        type="email"
-                        autoComplete="email"
-                        placeholder="voce@empresa.com"
-                        required
-                        className="pl-9"
-                        value={loginEmail}
-                        onChange={(e) => setLoginEmail(e.target.value)}
-                      />
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <Label htmlFor="login-password">Senha</Label>
-                      <button
-                        type="button"
-                        onClick={handleForgotPassword}
-                        className="text-xs font-medium text-primary hover:underline"
-                      >
-                        Esqueceu a senha?
-                      </button>
-                    </div>
-                    <div className="relative">
-                      <Lock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                      <Input
-                        id="login-password"
-                        type="password"
-                        autoComplete="current-password"
-                        placeholder="••••••••"
-                        required
-                        minLength={6}
-                        className="pl-9"
-                        value={loginPassword}
-                        onChange={(e) => setLoginPassword(e.target.value)}
-                      />
-                    </div>
-                  </div>
-                  <Button type="submit" className="w-full" disabled={loading}>
-                    {loading && <Loader2 className="h-4 w-4 animate-spin" />}
-                    {loading ? "Aguarde..." : "Entrar"}
-                  </Button>
-                </form>
-                {googleButton}
-              </TabsContent>
-
-              {/* Register */}
-              <TabsContent value="register" className="mt-6">
-                <div className="mb-6 space-y-1">
-                  <h1 className="text-2xl font-semibold text-foreground">Criar conta</h1>
-                  <p className="text-sm text-muted-foreground">
-                    Seu email precisa estar previamente autorizado pelo administrador.
-                  </p>
-                </div>
-                <form onSubmit={handleSignup} className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="reg-name">Nome</Label>
-                    <div className="relative">
-                      <User className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                      <Input
-                        id="reg-name"
-                        type="text"
-                        autoComplete="name"
-                        placeholder="Seu nome"
-                        className="pl-9"
-                        value={regName}
-                        onChange={(e) => setRegName(e.target.value)}
-                      />
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="reg-email">Email</Label>
-                    <div className="relative">
-                      <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                      <Input
-                        id="reg-email"
-                        type="email"
-                        autoComplete="email"
-                        placeholder="voce@empresa.com"
-                        required
-                        className="pl-9"
-                        value={regEmail}
-                        onChange={(e) => setRegEmail(e.target.value)}
-                      />
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="reg-password">Senha</Label>
-                    <div className="relative">
-                      <Lock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                      <Input
-                        id="reg-password"
-                        type="password"
-                        autoComplete="new-password"
-                        placeholder="Mínimo 6 caracteres"
-                        required
-                        minLength={6}
-                        className="pl-9"
-                        value={regPassword}
-                        onChange={(e) => setRegPassword(e.target.value)}
-                      />
-                    </div>
-                  </div>
-                  <Button type="submit" className="w-full" disabled={loading}>
-                    {loading && <Loader2 className="h-4 w-4 animate-spin" />}
-                    {loading ? "Aguarde..." : "Cadastrar"}
-                  </Button>
-                </form>
-                {googleButton}
-              </TabsContent>
-            </Tabs>
-          </div>
+      <div className="relative z-10 w-full max-w-[400px]">
+        {/* Header */}
+        <div className="text-center mb-10">
+          <p className="text-[#c8102e] text-[10px] font-bold tracking-[0.3em] uppercase mb-3">
+            DRE Inteligente
+          </p>
+          <h1 className="text-white font-bold tracking-tight text-2xl uppercase">
+            Rota das Carnes
+          </h1>
         </div>
 
-        {/* Disclaimer */}
-        <div
-          role="note"
-          className="flex items-start gap-3 rounded-xl border-l-4 border-amber-500 bg-card/90 p-4 text-xs leading-relaxed text-muted-foreground shadow-sm backdrop-blur"
-        >
-          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" aria-hidden />
-          <div className="space-y-2">
-            <p className="text-sm font-semibold text-foreground">
-              Acesso restrito
-            </p>
-            <p>
-              Somente emails previamente cadastrados pelo administrador têm
-              acesso ao sistema. Esta plataforma processa dados financeiros
-              sensíveis — mantenha suas credenciais protegidas.
-            </p>
+        {/* Toggle Entrar / Cadastrar */}
+        <div className="bg-zinc-900/50 p-1 rounded-full flex mb-8 border border-zinc-800/50">
+          <button
+            type="button"
+            onClick={() => setTab("login")}
+            className={`flex-1 py-2 text-sm font-semibold rounded-full transition-all ${
+              tab === "login"
+                ? "bg-zinc-800 text-white shadow-lg"
+                : "text-zinc-500 hover:text-zinc-300"
+            }`}
+          >
+            Entrar
+          </button>
+          <button
+            type="button"
+            onClick={() => setTab("register")}
+            className={`flex-1 py-2 text-sm font-semibold rounded-full transition-all ${
+              tab === "register"
+                ? "bg-zinc-800 text-white shadow-lg"
+                : "text-zinc-500 hover:text-zinc-300"
+            }`}
+          >
+            Cadastrar
+          </button>
+        </div>
+
+        {tab === "login" ? (
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div className="space-y-1.5">
+              <label htmlFor="login-email" className={labelCls}>Email</label>
+              <input
+                id="login-email"
+                type="email"
+                autoComplete="email"
+                required
+                placeholder="nome@empresa.com"
+                className={inputCls}
+                value={loginEmail}
+                onChange={(e) => setLoginEmail(e.target.value)}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <div className="flex justify-between items-end">
+                <label htmlFor="login-password" className={labelCls}>Senha</label>
+                <button
+                  type="button"
+                  onClick={handleForgotPassword}
+                  className="text-xs text-zinc-500 hover:text-[#c8102e] transition-colors"
+                >
+                  Esqueceu?
+                </button>
+              </div>
+              <input
+                id="login-password"
+                type="password"
+                autoComplete="current-password"
+                required
+                minLength={6}
+                placeholder="••••••••"
+                className={inputCls}
+                value={loginPassword}
+                onChange={(e) => setLoginPassword(e.target.value)}
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full bg-[#c8102e] hover:bg-[#a60d26] disabled:opacity-60 text-white font-bold py-3.5 rounded-xl transition-all shadow-[0_0_24px_rgba(200,16,46,0.28)] active:scale-[0.98] mt-2 flex items-center justify-center gap-2"
+            >
+              {loading && <Loader2 className="h-4 w-4 animate-spin" />}
+              {loading ? "Aguarde..." : "Acessar Painel"}
+            </button>
+
+            {googleEnabled && (
+              <>
+                <div className="relative py-4">
+                  <div className="absolute inset-0 flex items-center">
+                    <div className="w-full border-t border-zinc-800/60" />
+                  </div>
+                  <div className="relative flex justify-center text-xs uppercase">
+                    <span className="bg-[#050505] px-2 text-zinc-600 tracking-widest font-medium">
+                      Ou continue com
+                    </span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleGoogleLogin}
+                  disabled={googleLoading}
+                  className="w-full bg-transparent border border-zinc-800 hover:bg-zinc-900 disabled:opacity-60 text-white font-medium py-3 rounded-xl transition-all flex items-center justify-center gap-3"
+                >
+                  {googleLoading ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <GoogleIcon className="h-4 w-4" />
+                  )}
+                  Google SSO
+                </button>
+              </>
+            )}
+          </form>
+        ) : (
+          <form onSubmit={handleSignup} className="space-y-4">
+            <div className="space-y-1.5">
+              <label htmlFor="reg-name" className={labelCls}>Nome</label>
+              <input
+                id="reg-name"
+                type="text"
+                autoComplete="name"
+                placeholder="Seu nome"
+                className={inputCls}
+                value={regName}
+                onChange={(e) => setRegName(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label htmlFor="reg-email" className={labelCls}>Email</label>
+              <input
+                id="reg-email"
+                type="email"
+                autoComplete="email"
+                required
+                placeholder="nome@empresa.com"
+                className={inputCls}
+                value={regEmail}
+                onChange={(e) => setRegEmail(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label htmlFor="reg-password" className={labelCls}>Senha</label>
+              <input
+                id="reg-password"
+                type="password"
+                autoComplete="new-password"
+                required
+                minLength={6}
+                placeholder="Mínimo 6 caracteres"
+                className={inputCls}
+                value={regPassword}
+                onChange={(e) => setRegPassword(e.target.value)}
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full bg-[#c8102e] hover:bg-[#a60d26] disabled:opacity-60 text-white font-bold py-3.5 rounded-xl transition-all shadow-[0_0_24px_rgba(200,16,46,0.28)] active:scale-[0.98] mt-2 flex items-center justify-center gap-2"
+            >
+              {loading && <Loader2 className="h-4 w-4 animate-spin" />}
+              {loading ? "Aguarde..." : "Criar conta"}
+            </button>
+
+            {googleEnabled && (
+              <>
+                <div className="relative py-4">
+                  <div className="absolute inset-0 flex items-center">
+                    <div className="w-full border-t border-zinc-800/60" />
+                  </div>
+                  <div className="relative flex justify-center text-xs uppercase">
+                    <span className="bg-[#050505] px-2 text-zinc-600 tracking-widest font-medium">
+                      Ou continue com
+                    </span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleGoogleLogin}
+                  disabled={googleLoading}
+                  className="w-full bg-transparent border border-zinc-800 hover:bg-zinc-900 disabled:opacity-60 text-white font-medium py-3 rounded-xl transition-all flex items-center justify-center gap-3"
+                >
+                  {googleLoading ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <GoogleIcon className="h-4 w-4" />
+                  )}
+                  Google SSO
+                </button>
+              </>
+            )}
+          </form>
+        )}
+
+        {/* Aviso de acesso restrito */}
+        <div className="mt-12 flex flex-col items-center gap-3">
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-[#c8102e]/5 rounded-full border border-[#c8102e]/15">
+            <ShieldAlert className="w-3.5 h-3.5 text-[#c8102e]" />
+            <span className="text-[10px] text-[#c8102e] font-bold uppercase tracking-widest">
+              Acesso Restrito
+            </span>
           </div>
+          <p className="text-zinc-600 text-[11px] leading-relaxed max-w-[300px] text-center">
+            Ambiente corporativo seguro. Uso exclusivo para colaboradores e parceiros
+            previamente autorizados pelo administrador.
+          </p>
         </div>
       </div>
     </div>
