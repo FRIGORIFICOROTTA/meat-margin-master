@@ -1,12 +1,11 @@
 import { createFileRoute, useRouter } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useSession } from "@/lib/use-session";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import { z } from "zod";
 import { setEmpresaSelecionada } from "@/lib/app-state";
@@ -22,13 +21,51 @@ const schema = z.object({
   cnpj: z.string().trim().max(20).optional().or(z.literal("")),
   uf: z.string().trim().max(2).optional().or(z.literal("")),
   cidade: z.string().trim().max(120).optional().or(z.literal("")),
-  regime: z.enum(["gerencial", "lucro_real"]),
 });
+
+function normalizeCnpj(v: string | null | undefined) {
+  const digits = (v ?? "").replace(/\D+/g, "");
+  return digits.length ? digits : null;
+}
+
+function friendlyDbError(err: unknown): string {
+  const anyErr = err as { code?: string; message?: string } | null;
+  const code = anyErr?.code;
+  const msg = anyErr?.message ?? "";
+  if (code === "23505" && msg.includes("empresas_cnpj_key")) {
+    return "Já existe uma empresa cadastrada com este CNPJ. Peça acesso ao administrador do grupo ou use outro CNPJ.";
+  }
+  if (code === "23505") return "Registro duplicado. Verifique os dados e tente novamente.";
+  if (code === "42501" || msg.toLowerCase().includes("row-level security")) {
+    return "Sem permissão para criar. Faça login novamente e tente de novo.";
+  }
+  return msg || "Erro ao criar grupo/empresa";
+}
 
 function Onboarding() {
   const { user } = useSession();
   const router = useRouter();
   const [loading, setLoading] = useState(false);
+  const [checking, setChecking] = useState(true);
+
+  // Gate: se o usuário já tem perfil OU vínculo com alguma empresa,
+  // ele não deve ver o onboarding (é um usuário convidado, não o criador do grupo).
+  useEffect(() => {
+    if (!user) return;
+    (async () => {
+      const [{ data: perfil }, { data: vinculos }] = await Promise.all([
+        supabase.from("usuarios_perfil").select("user_id").eq("user_id", user.id).maybeSingle(),
+        supabase.from("usuarios_empresas").select("empresa_id").eq("user_id", user.id).limit(1),
+      ]);
+      if (perfil || (vinculos && vinculos.length > 0)) {
+        if (vinculos && vinculos[0]) setEmpresaSelecionada(vinculos[0].empresa_id);
+        router.navigate({ to: "/dashboard" });
+        return;
+      }
+      setChecking(false);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
 
   async function onSubmit(form: FormData) {
     if (!user) return;
@@ -39,21 +76,22 @@ function Onboarding() {
       cnpj: form.get("cnpj"),
       uf: form.get("uf"),
       cidade: form.get("cidade"),
-      regime: form.get("regime"),
     });
     if (!parsed.success) {
       toast.error(parsed.error.issues[0]?.message ?? "Dados inválidos");
       return;
     }
     setLoading(true);
+    let createdGrupoId: string | null = null;
     try {
-      // 1) cria grupo
+      // 1) grupo
       const { data: grupo, error: gErr } = await supabase
         .from("grupos")
         .insert({ nome: parsed.data.nomeGrupo, owner_id: user.id })
         .select()
         .single();
       if (gErr) throw gErr;
+      createdGrupoId = grupo.id;
 
       // 2) perfil
       const { error: pErr } = await supabase
@@ -64,16 +102,15 @@ function Onboarding() {
         );
       if (pErr) throw pErr;
 
-      // 3) empresa (matriz)
+      // 3) empresa matriz (regime_tributario usa default do banco = 'gerencial')
       const { data: emp, error: eErr } = await supabase
         .from("empresas")
         .insert({
           grupo_id: grupo.id,
           nome: parsed.data.nomeEmpresa,
-          cnpj: parsed.data.cnpj || null,
-          uf: parsed.data.uf || null,
+          cnpj: normalizeCnpj(parsed.data.cnpj),
+          uf: parsed.data.uf ? parsed.data.uf.toUpperCase() : null,
           cidade: parsed.data.cidade || null,
-          regime_tributario: parsed.data.regime,
           tipo: "matriz",
         })
         .select()
@@ -81,16 +118,31 @@ function Onboarding() {
       if (eErr) throw eErr;
 
       // 4) vínculo
-      await supabase.from("usuarios_empresas").insert({ user_id: user.id, empresa_id: emp.id });
+      const { error: vErr } = await supabase
+        .from("usuarios_empresas")
+        .insert({ user_id: user.id, empresa_id: emp.id });
+      if (vErr) throw vErr;
 
       setEmpresaSelecionada(emp.id);
       toast.success("Setup concluído!");
       router.navigate({ to: "/dashboard" });
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Erro ao criar grupo/empresa");
+      // Rollback: se o grupo foi criado mas algo depois falhou, remove o grupo órfão.
+      if (createdGrupoId) {
+        await supabase.from("grupos").delete().eq("id", createdGrupoId);
+      }
+      toast.error(friendlyDbError(err));
     } finally {
       setLoading(false);
     }
+  }
+
+  if (checking) {
+    return (
+      <div className="grid place-items-center py-16 text-sm text-muted-foreground">
+        Carregando...
+      </div>
+    );
   }
 
   return (
@@ -124,16 +176,6 @@ function Onboarding() {
                 <Field name="cnpj" label="CNPJ da matriz" placeholder="00.000.000/0000-00" />
                 <Field name="cidade" label="Cidade" />
                 <Field name="uf" label="UF" maxLength={2} />
-              </div>
-              <div className="mt-3 space-y-1.5">
-                <Label>Regime de DRE</Label>
-                <Select name="regime" defaultValue="gerencial">
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="gerencial">Gerencial</SelectItem>
-                    <SelectItem value="lucro_real">Lucro Real (fiscal)</SelectItem>
-                  </SelectContent>
-                </Select>
               </div>
             </div>
             <Button className="w-full" disabled={loading}>
