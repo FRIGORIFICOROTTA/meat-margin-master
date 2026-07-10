@@ -1,45 +1,80 @@
-# Ajustes na tela de login + esclarecimento do fluxo de cadastro
+## Diagnóstico
 
-## 1. Tela de login — ajustes visuais
+Reproduzi o cenário com os logs do Supabase Auth e a rede: o cadastro **foi criado** (HTTP 200 em `/signup` com `confirmation_sent_at` e sem `session`), mas você não vê nada porque:
 
-**`src/components/auth/LoginSignupForm.tsx`**:
-- **Marca d'água maior**: `w-[min(80vw,720px)]` → `w-[min(110vw,1200px)]`, mantendo opacidade discreta (~0.05) e `mix-blend-luminosity`.
-- **Logo em elipse antes do wordmark**: adicionar um círculo (`w-20 h-20 rounded-full`) com o `BRAND_LOGO_URL` dentro, borda vermelha sutil (`border border-[#c8102e]/30`), fundo `bg-zinc-900/60`, sombra glow vermelha (`shadow-[0_0_40px_rgba(200,16,46,0.25)]`), posicionado acima do título "ROTA DAS CARNES" (centralizado, margem inferior).
-- **Botão Google sempre visível**: remover a condicional `googleEnabled` do render dos dois formulários (login e cadastro). O botão aparece sempre; se o Google não estiver ativado no Supabase, o toast "Login com Google ainda não está ativado no Supabase" continua tratando o erro. A tela de Configurações → Google Login continua controlando a config em `google_oauth_config`, mas o botão passa a ser sempre exibido.
+1. **O `<Toaster />` só existe dentro do layout `_authenticated`** (`src/routes/_authenticated/route.tsx:91`). Na tela `/auth` (pública) não há Toaster montado, então **nenhum `toast.success` / `toast.error` aparece** — nem "Verifique seu email", nem "Email não autorizado", nem erros de senha. É o principal motivo de "nenhum informativo de status".
+2. **Confirmação de email está ligada no Supabase** (o `/signup` respondeu `confirmation_sent_at` e sem sessão). Sem clicar no link do email o usuário não entra — e sem toast ele nem sabe que precisa checar o email.
+3. O botão volta para "Criar conta" (sem erro) e o usuário fica na mesma tela → parece que "nada aconteceu".
+4. **Não há checagem de email já cadastrado antes do signup** — usuário tenta 3× o mesmo email (`user_repeated_signup` nos logs) sem receber mensagem clara.
 
-## 2. Sobre o fluxo de cadastro (confirmação, não é mudança de código)
+---
 
-Confirmando o comportamento atual, que **já está correto** conforme sua pergunta:
+## Plano — Validação ponta a ponta do primeiro acesso
 
-- **Primeiro cadastro** (via tela `/auth` → aba "Cadastrar"):
-  1. Usuário se cadastra com email/senha (email precisa estar em `allowed_emails`).
-  2. Ao logar pela primeira vez sem grupo, é redirecionado para `/onboarding`.
-  3. Em `/onboarding` cria **grupo econômico + empresa matriz** (código já existe em `src/routes/_authenticated/onboarding.tsx`).
-  4. Esse primeiro usuário vira o **owner do grupo** (`grupos.owner_id`) e, portanto, admin do sistema (`is_admin()` retorna true para ele).
+### 1. Corrigir feedback visual na tela `/auth`
+- Adicionar `<Toaster richColors position="top-center" />` dentro do próprio `LoginSignupForm.tsx` (ou no `routes/auth.tsx`) para que os toasts apareçam na tela de login.
+- Adicionar um bloco de **status inline** (alerta persistente abaixo do botão) para mensagens críticas — toast some, alerta fica: 
+  - "Conta criada! Enviamos um link de confirmação para `email@x.com`. Verifique sua caixa de entrada e spam."
+  - "Este email não está autorizado. Peça liberação ao administrador."
+  - "Email ou senha incorretos."
+- Trocar mensagens de erro pelo `friendlyAuthError` já existente + tratar explicitamente `user_already_registered` → "Este email já tem conta, use Entrar ou 'Esqueceu?'".
 
-- **Usuários adicionais**: entram por Configurações → Acessos. O admin:
-  1. Cadastra o email em `allowed_emails`.
-  2. Envia o link de cadastro para o novo usuário (ele se cadastra em `/auth`).
-  3. Se quiser vincular a empresas específicas, usa a tabela `usuarios_empresas` (isso ainda não tem UI — pode ser um próximo passo se você precisar).
+### 2. Tela de "cadastro concluído — confirme seu email"
+Após signup bem-sucedido sem sessão, trocar o formulário por uma tela de confirmação com:
+- Ícone + "Enviamos um link para **email**"
+- Botão **Reenviar email de confirmação** (usa `supabase.auth.resend({ type: 'signup', email })`)
+- Botão **Voltar para login**
+- Instrução clara sobre checar spam
 
-## 3. Confirmação de email no primeiro acesso
+### 3. Fluxo end-to-end do primeiro acesso (documentado + testado)
+```text
+1. Admin adiciona email em Configurações → Acessos (tabela allowed_emails)
+2. Usuário abre /auth → aba Cadastrar → nome + email + senha
+3. Front chama checkEmailAllowed(email)
+    ├─ não autorizado → alerta vermelho persistente + toast
+    └─ autorizado → supabase.auth.signUp()
+        ├─ retorna session   → toast sucesso → /onboarding
+        └─ sem session (confirm ON) → tela "confirme seu email" (item 2)
+4. Usuário clica no link do email → volta em /auth com sessão ativa
+5. useEffect em /auth detecta sessão → checkEmailAllowed novamente (defesa)
+    └─ ok → navega para nextPath (/dashboard)
+6. _authenticated/route.tsx checa usuarios_perfil.grupo_id
+    ├─ SEM grupo (primeiro do grupo) → /onboarding → cria grupo + matriz → vira admin (grupos.owner_id=user.id)
+    └─ COM grupo → /dashboard direto
+7. Usuários subsequentes (adicionados por admin em allowed_emails):
+   fazem signup, NÃO passam por onboarding, precisam ser vinculados a empresa
+   em Configurações → Acessos (usuarios_empresas)
+```
 
-O envio do email de confirmação é **controlado pelo Supabase Auth**, não pelo código do app. Situação atual:
+### 4. Checagens necessárias no Supabase Dashboard (fora do código)
+Não posso alterar isso via código — precisa ser feito no dashboard do Supabase externo:
+- **Authentication → URL Configuration → Redirect URLs**: adicionar `https://dre.rotadascarnes.com/**`, `https://meat-metrics.lovable.app/**` e a preview URL. **Sem isso o link do email quebra.**
+- **Authentication → Providers → Email → Confirm email**: manter ON (mais seguro, allowlist é a barreira principal) OU desligar para MVP (login imediato após signup).
+- **Authentication → SMTP**: o SMTP default do Supabase entrega ~3 emails/hora. Para produção configurar Resend/SendGrid. **Se não configurar, o link pode nem chegar** — outro sintoma de "não abre nada".
+- **Site URL**: apontar para `https://dre.rotadascarnes.com`.
 
-- Este projeto usa Supabase **externo** (não Lovable Cloud). Portanto o Lovable não pode automatizar templates/SMTP.
-- Ao cadastrar, o código já trata os dois cenários (`src/components/auth/LoginSignupForm.tsx`):
-  - Se `data.session` existe → confirmação desativada, entra direto no onboarding.
-  - Se não → mostra toast "Verifique seu email para confirmar o cadastro."
+### 5. Melhorias na criação de usuários subsequentes (Configurações → Acessos)
+Já existe a aba de Acessos e a tabela `allowed_emails`. Adicionar:
+- Ao inserir um email na allowlist, **enviar convite** via `supabase.auth.admin.inviteUserByEmail(email)` numa server function admin (usa `supabaseAdmin`) — assim o usuário recebe email com link para definir senha, sem precisar clicar em "Cadastrar" sozinho.
+- Após o usuário aceitar, permitir na mesma tela **vincular a empresas** (`usuarios_empresas`) — hoje esse vínculo não tem UI.
 
-**O que você precisa verificar no Supabase Dashboard** (`Authentication → Providers → Email`):
-- **"Confirm email"**: se estiver **ON**, o usuário precisa clicar no link do email antes de logar. Se **OFF**, cadastro entra direto (recomendado para MVP interno já que a allowlist já filtra quem entra).
-- **SMTP**: por padrão o Supabase usa o SMTP dele com limite baixo (3–4 emails/hora). Para produção real, configurar SMTP próprio em `Authentication → SMTP Settings` (Resend, SendGrid etc.) — sem isso, emails de confirmação/reset podem não chegar.
-- **Redirect URLs**: em `Authentication → URL Configuration`, incluir a URL de produção (`https://dre.rotadascarnes.com`) e a de preview em "Redirect URLs", senão o link do email confirmação/reset volta para localhost.
-- **Template "Confirm signup"**: pode ser customizado com marca Rota das Carnes.
+---
 
-Vou deixar um alerta discreto em Configurações → Google Login (ou criar uma sub-seção "Autenticação por email") apontando esses 3 pontos? **Se quiser**, marque isso no seu retorno; se não, apenas ajusto a tela de login.
+## Arquivos afetados
 
-## Fora de escopo (deste plano)
-- UI para vincular usuários a empresas específicas.
-- Configuração de SMTP/templates no Supabase (feito no dashboard, não em código).
-- Enviar convite automático por email para novo email adicionado à allowlist.
+- `src/components/auth/LoginSignupForm.tsx` — Toaster local, alerta inline persistente, tela pós-signup com reenvio, tratamento de erros extras.
+- `src/routes/auth.tsx` (verificar / adicionar Toaster de segurança).
+- `src/lib/auth-allowlist.functions.ts` — adicionar `inviteUser` (server function admin).
+- `src/components/settings/AccessTab.tsx` — botão "Enviar convite" ao adicionar email + UI de vinculação a empresas.
+
+## Fora do escopo desta iteração
+- Alterações no dashboard do Supabase (item 4) — instruções passadas ao usuário.
+- Custom SMTP.
+
+---
+
+## Perguntas antes de implementar
+
+1. **Confirmação de email**: manter ON (mais seguro, exige clicar no link) ou desligar (login imediato após cadastro, mais rápido para MVP)?
+2. **Convite automático** ao adicionar email em Acessos: implementar agora (`inviteUserByEmail` via admin) ou deixar o próprio usuário se cadastrar via `/auth`?
+3. **UI de vincular usuário a empresas** em Configurações → Acessos: entra nesta iteração?
