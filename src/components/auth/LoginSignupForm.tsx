@@ -1,5 +1,7 @@
-import { useState, FormEvent } from "react";
+import { useState, FormEvent, useEffect } from "react";
 import { useRouter } from "@tanstack/react-router";
+import { useQuery } from "@tanstack/react-query";
+import { useServerFn } from "@tanstack/react-start";
 import { User, Lock, Mail, AlertTriangle, ShieldCheck, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
@@ -8,6 +10,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { GoogleIcon } from "@/components/auth/GoogleIcon";
+import { BRAND_LOGO_URL, BrandLogo } from "@/components/brand/BrandLogo";
+import { checkEmailAllowed, getGoogleOAuthConfig } from "@/lib/auth-allowlist.functions";
 
 interface LoginSignupFormProps {
   nextPath?: string;
@@ -23,11 +27,23 @@ function friendlyAuthError(message: string): string {
   return message;
 }
 
+const NOT_ALLOWED_MSG =
+  "Este email não está autorizado a acessar o sistema. Peça ao administrador para liberar seu acesso.";
+
 const LoginSignupForm = ({ nextPath }: LoginSignupFormProps) => {
   const router = useRouter();
   const [tab, setTab] = useState<"login" | "register">("login");
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+
+  const checkAllowedFn = useServerFn(checkEmailAllowed);
+  const getGoogleCfgFn = useServerFn(getGoogleOAuthConfig);
+
+  const googleCfgQ = useQuery({
+    queryKey: ["google-oauth-config-public"],
+    queryFn: () => getGoogleCfgFn(),
+  });
+  const googleEnabled = !!googleCfgQ.data?.enabled;
 
   // login state
   const [loginEmail, setLoginEmail] = useState("");
@@ -45,9 +61,40 @@ const LoginSignupForm = ({ nextPath }: LoginSignupFormProps) => {
     ? `${window.location.origin}${postLoginTarget}`
     : postLoginTarget;
 
+  // Gate pós-OAuth: se o usuário chega já logado (retorno do Google) e o email
+  // não está autorizado, faz signOut imediatamente.
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.auth.getSession();
+      const email = data.session?.user.email;
+      if (!email) return;
+      const { allowed } = await checkAllowedFn({ data: { email } });
+      if (!allowed) {
+        await supabase.auth.signOut();
+        toast.error(NOT_ALLOWED_MSG);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function assertAllowed(email: string): Promise<boolean> {
+    try {
+      const { allowed } = await checkAllowedFn({ data: { email } });
+      return allowed;
+    } catch {
+      return false;
+    }
+  }
+
   const handleLogin = async (e: FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    const allowed = await assertAllowed(loginEmail);
+    if (!allowed) {
+      toast.error(NOT_ALLOWED_MSG);
+      setLoading(false);
+      return;
+    }
     const { error } = await supabase.auth.signInWithPassword({
       email: loginEmail,
       password: loginPassword,
@@ -63,6 +110,12 @@ const LoginSignupForm = ({ nextPath }: LoginSignupFormProps) => {
   const handleSignup = async (e: FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    const allowed = await assertAllowed(regEmail);
+    if (!allowed) {
+      toast.error(NOT_ALLOWED_MSG);
+      setLoading(false);
+      return;
+    }
     const { data, error } = await supabase.auth.signUp({
       email: regEmail,
       password: regPassword,
@@ -112,10 +165,10 @@ const LoginSignupForm = ({ nextPath }: LoginSignupFormProps) => {
       toast.error(friendlyAuthError(error.message));
       setGoogleLoading(false);
     }
-    // Em caso de sucesso, o navegador é redirecionado para o Google.
+    // Sucesso: navegador redireciona para o Google.
   };
 
-  const googleButton = (
+  const googleButton = googleEnabled ? (
     <div className="mt-5">
       <div className="relative my-4">
         <div className="absolute inset-0 flex items-center">
@@ -140,12 +193,27 @@ const LoginSignupForm = ({ nextPath }: LoginSignupFormProps) => {
         Continuar com Google
       </Button>
     </div>
-  );
+  ) : null;
 
   return (
-    <div className="min-h-screen w-full bg-background flex items-center justify-center p-4 sm:p-6">
-      <div className="w-full max-w-5xl space-y-5">
-        <div className="grid overflow-hidden rounded-2xl border border-border bg-card shadow-lg lg:grid-cols-2">
+    <div
+      className="relative min-h-screen w-full flex items-center justify-center p-4 sm:p-6"
+      style={{
+        backgroundColor: "#0a0a0a",
+        backgroundImage: `url(${BRAND_LOGO_URL})`,
+        backgroundRepeat: "no-repeat",
+        backgroundPosition: "center",
+        backgroundSize: "min(70vh, 700px)",
+      }}
+    >
+      {/* Overlay escuro para reduzir o brilho do fundo */}
+      <div
+        aria-hidden
+        className="absolute inset-0"
+        style={{ backgroundColor: "rgba(10,10,10,0.88)" }}
+      />
+      <div className="relative z-10 w-full max-w-5xl space-y-5">
+        <div className="grid overflow-hidden rounded-2xl border border-border bg-card shadow-2xl lg:grid-cols-2">
           {/* Brand panel */}
           <div className="relative hidden flex-col justify-between bg-sidebar p-10 text-sidebar-foreground lg:flex">
             <div
@@ -157,23 +225,24 @@ const LoginSignupForm = ({ nextPath }: LoginSignupFormProps) => {
               }}
             />
             <div className="relative z-10 flex items-center gap-3">
-              <div className="grid h-11 w-11 place-items-center rounded-lg bg-primary text-primary-foreground text-lg font-bold shadow">
-                R
-              </div>
+              <BrandLogo className="h-12 w-12" />
               <div className="leading-tight">
                 <p className="text-sm font-semibold">Rota das Carnes</p>
                 <p className="text-xs opacity-80">DRE Inteligente</p>
               </div>
             </div>
 
-            <div className="relative z-10 space-y-4">
-              <h2 className="text-3xl font-semibold leading-tight">
-                Gestão financeira completa para o seu negócio.
-              </h2>
-              <p className="max-w-sm text-sm opacity-80">
-                DRE Gerencial, Fiscal, controle de estoque e análise por período — em um só lugar,
-                com a inteligência do seu CFO Digital.
-              </p>
+            <div className="relative z-10 flex flex-col items-center gap-6 py-6">
+              <BrandLogo className="h-48 w-48 drop-shadow-2xl" />
+              <div className="space-y-3 text-center">
+                <h2 className="text-2xl font-semibold leading-tight">
+                  Gestão financeira completa para o seu negócio.
+                </h2>
+                <p className="mx-auto max-w-sm text-sm opacity-80">
+                  DRE Gerencial, Fiscal, controle de estoque e análise por período —
+                  em um só lugar.
+                </p>
+              </div>
             </div>
 
             <div className="relative z-10 flex items-center gap-2 text-xs opacity-80">
@@ -186,9 +255,7 @@ const LoginSignupForm = ({ nextPath }: LoginSignupFormProps) => {
           <div className="flex flex-col justify-center p-8 sm:p-10">
             {/* Mobile brand */}
             <div className="mb-6 flex items-center gap-3 lg:hidden">
-              <div className="grid h-10 w-10 place-items-center rounded-lg bg-primary text-primary-foreground font-bold">
-                R
-              </div>
+              <BrandLogo className="h-10 w-10" />
               <div className="leading-tight">
                 <p className="text-sm font-semibold text-foreground">Rota das Carnes</p>
                 <p className="text-xs text-muted-foreground">DRE Inteligente</p>
@@ -265,7 +332,7 @@ const LoginSignupForm = ({ nextPath }: LoginSignupFormProps) => {
                 <div className="mb-6 space-y-1">
                   <h1 className="text-2xl font-semibold text-foreground">Criar conta</h1>
                   <p className="text-sm text-muted-foreground">
-                    Preencha seus dados para começar.
+                    Seu email precisa estar previamente autorizado pelo administrador.
                   </p>
                 </div>
                 <form onSubmit={handleSignup} className="space-y-4">
@@ -331,20 +398,17 @@ const LoginSignupForm = ({ nextPath }: LoginSignupFormProps) => {
         {/* Disclaimer */}
         <div
           role="note"
-          className="flex items-start gap-3 rounded-xl border-l-4 border-amber-500 bg-card/80 p-4 text-xs leading-relaxed text-muted-foreground shadow-sm backdrop-blur"
+          className="flex items-start gap-3 rounded-xl border-l-4 border-amber-500 bg-card/90 p-4 text-xs leading-relaxed text-muted-foreground shadow-sm backdrop-blur"
         >
           <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" aria-hidden />
           <div className="space-y-2">
             <p className="text-sm font-semibold text-foreground">
-              Uso consciente e responsabilidade
+              Acesso restrito
             </p>
             <p>
-              Esta plataforma processa dados financeiros sensíveis. Recomendamos o acompanhamento
-              por{" "}
-              <strong className="font-semibold text-foreground">
-                auditorias de segurança regulares
-              </strong>{" "}
-              e a adoção de boas práticas de proteção de credenciais e acessos.
+              Somente emails previamente cadastrados pelo administrador têm
+              acesso ao sistema. Esta plataforma processa dados financeiros
+              sensíveis — mantenha suas credenciais protegidas.
             </p>
           </div>
         </div>
