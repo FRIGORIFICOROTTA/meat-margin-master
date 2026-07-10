@@ -497,6 +497,10 @@ const LoginSignupForm = ({ nextPath }: LoginSignupFormProps) => {
             </button>
           </form>
         )}
+        </>
+        )}
+
+
 
         {/* Aviso de acesso restrito */}
         <div className="mt-12 flex flex-col items-center gap-3">
