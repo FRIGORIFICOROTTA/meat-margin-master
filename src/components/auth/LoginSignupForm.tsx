@@ -144,10 +144,23 @@ const LoginSignupForm = ({ nextPath }: LoginSignupFormProps) => {
     if (data.session) {
       showSuccess("Conta criada! Vamos configurar sua empresa.");
       router.navigate({ to: "/onboarding" });
-    } else {
-      setPendingConfirmEmail(regEmail);
-      showInfo(`Enviamos um link de confirmação para ${regEmail}.`);
+      return;
     }
+    // Sem sessão = Supabase exige confirmação por email. Tentamos logar direto;
+    // se a instância estiver com "Confirm email" desligado, funciona na hora.
+    const { error: signInErr } = await supabase.auth.signInWithPassword({
+      email: regEmail,
+      password: regPassword,
+    });
+    if (!signInErr) {
+      showSuccess("Conta criada! Vamos configurar sua empresa.");
+      router.navigate({ to: "/onboarding" });
+      return;
+    }
+    // Confirmação de email ainda está ativa no Supabase.
+    showInfo(
+      `Conta criada para ${regEmail}. A confirmação por email está ativa no Supabase — desative em Authentication → Providers → Email para liberar o acesso imediato, ou peça ao administrador.`,
+    );
   };
 
   const handleResendConfirmation = async () => {
