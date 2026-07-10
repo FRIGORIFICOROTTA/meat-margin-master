@@ -66,11 +66,25 @@ const LoginSignupForm = ({ nextPath }: LoginSignupFormProps) => {
       const { allowed } = await checkAllowedFn({ data: { email } });
       if (!allowed) {
         await supabase.auth.signOut();
+        setStatus({ kind: "error", msg: NOT_ALLOWED_MSG });
         toast.error(NOT_ALLOWED_MSG);
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  function showError(msg: string) {
+    setStatus({ kind: "error", msg });
+    toast.error(msg);
+  }
+  function showSuccess(msg: string) {
+    setStatus({ kind: "success", msg });
+    toast.success(msg);
+  }
+  function showInfo(msg: string) {
+    setStatus({ kind: "info", msg });
+    toast.info(msg);
+  }
 
   async function assertAllowed(email: string): Promise<boolean> {
     try {
@@ -83,10 +97,11 @@ const LoginSignupForm = ({ nextPath }: LoginSignupFormProps) => {
 
   const handleLogin = async (e: FormEvent) => {
     e.preventDefault();
+    setStatus({ kind: "idle" });
     setLoading(true);
     const allowed = await assertAllowed(loginEmail);
     if (!allowed) {
-      toast.error(NOT_ALLOWED_MSG);
+      showError(NOT_ALLOWED_MSG);
       setLoading(false);
       return;
     }
@@ -95,19 +110,21 @@ const LoginSignupForm = ({ nextPath }: LoginSignupFormProps) => {
       password: loginPassword,
     });
     if (error) {
-      toast.error(friendlyAuthError(error.message));
+      showError(friendlyAuthError(error.message));
       setLoading(false);
     } else {
+      showSuccess("Login efetuado! Redirecionando...");
       router.navigate({ to: postLoginTarget });
     }
   };
 
   const handleSignup = async (e: FormEvent) => {
     e.preventDefault();
+    setStatus({ kind: "idle" });
     setLoading(true);
     const allowed = await assertAllowed(regEmail);
     if (!allowed) {
-      toast.error(NOT_ALLOWED_MSG);
+      showError(NOT_ALLOWED_MSG);
       setLoading(false);
       return;
     }
@@ -119,45 +136,63 @@ const LoginSignupForm = ({ nextPath }: LoginSignupFormProps) => {
         data: regName ? { full_name: regName } : undefined,
       },
     });
+    setLoading(false);
     if (error) {
-      toast.error(friendlyAuthError(error.message));
-      setLoading(false);
+      showError(friendlyAuthError(error.message));
       return;
     }
     if (data.session) {
-      toast.success("Conta criada com sucesso!");
+      showSuccess("Conta criada! Vamos configurar sua empresa.");
       router.navigate({ to: "/onboarding" });
     } else {
-      toast.success("Verifique seu email para confirmar o cadastro.");
-      setLoading(false);
+      setPendingConfirmEmail(regEmail);
+      showInfo(`Enviamos um link de confirmação para ${regEmail}.`);
+    }
+  };
+
+  const handleResendConfirmation = async () => {
+    if (!pendingConfirmEmail) return;
+    setLoading(true);
+    const { error } = await supabase.auth.resend({
+      type: "signup",
+      email: pendingConfirmEmail,
+      options: { emailRedirectTo: absoluteTarget },
+    });
+    setLoading(false);
+    if (error) {
+      showError(friendlyAuthError(error.message));
+    } else {
+      showSuccess("Novo link enviado. Verifique seu email (e a caixa de spam).");
     }
   };
 
   const handleForgotPassword = async () => {
+    setStatus({ kind: "idle" });
     if (!loginEmail || !loginEmail.includes("@")) {
-      toast.error("Digite seu email no campo acima para recuperar a senha.");
+      showError("Digite seu email no campo acima para recuperar a senha.");
       return;
     }
     setLoading(true);
     const { error } = await supabase.auth.resetPasswordForEmail(loginEmail, {
       redirectTo: `${window.location.origin}/definir-senha`,
     });
-    if (error) {
-      toast.error(friendlyAuthError(error.message));
-    } else {
-      toast.success("Enviamos um link para você redefinir sua senha. Verifique seu email.");
-    }
     setLoading(false);
+    if (error) {
+      showError(friendlyAuthError(error.message));
+    } else {
+      showSuccess("Enviamos um link para redefinir sua senha. Verifique seu email.");
+    }
   };
 
   const handleGoogleLogin = async () => {
+    setStatus({ kind: "idle" });
     setGoogleLoading(true);
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: { redirectTo: absoluteTarget },
     });
     if (error) {
-      toast.error(friendlyAuthError(error.message));
+      showError(friendlyAuthError(error.message));
       setGoogleLoading(false);
     }
   };
