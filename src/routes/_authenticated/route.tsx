@@ -198,8 +198,8 @@ function NavLink({
   return (
     <Link
       to={to}
-      activeProps={{ className: "bg-secondary text-secondary-foreground" }}
-      className="inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium text-muted-foreground hover:bg-secondary hover:text-secondary-foreground transition-colors"
+      activeProps={{ className: "bg-sidebar-accent text-sidebar-primary" }}
+      className="inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground transition-colors"
     >
       {icon}
       {children}
