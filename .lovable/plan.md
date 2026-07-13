@@ -1,39 +1,34 @@
 ## Objetivo
+Deixar o SEO do sistema validado e "OK" para que ele apareça em buscas no navegador (Google/Bing) quando pesquisado.
 
-Na aba **Configurações → Acessos**, o admin (dono do grupo) poderá ver todos os usuários já vinculados ao seu grupo e alterar o papel deles entre:
-- **admin_grupo** — acesso total, inclusive gerenciar acessos
-- **gestor_empresa** — operador (padrão dos convidados)
-- **visualizador** — somente leitura
+## Contexto
+- O app é um sistema privado de gestão (DRE Rota das Carnes) — todas as rotas úteis ficam atrás de login (`/_authenticated/*`).
+- Domínio ativo: `https://dre.rotadascarnes.com`.
+- `__root.tsx` já tem title, description, Open Graph e Twitter Card configurados.
+- Não existe `robots.txt` nem `sitemap.xml` no projeto ainda.
 
-## Mudanças
+## Passos
 
-### 1. Banco (migração)
+1. **Rodar scan de SEO** no projeto (`seo_chat--trigger_scan`) e ler os achados (`seo_chat--list_findings`) para saber exatamente o que o scanner considera pendente.
 
-- Nova função `public.list_grupo_usuarios()` (SECURITY DEFINER) — retorna, para o grupo do admin autenticado, a lista de `{ user_id, nome, email, papel, created_at }` juntando `usuarios_perfil` + `auth.users` (email). Só executa se `auth.uid()` for owner de algum grupo.
-- Nova função `public.update_usuario_papel(_user_id uuid, _papel papel_usuario)` (SECURITY DEFINER) — muda o papel de um usuário, validando que:
-  - o chamador é owner do grupo do usuário-alvo
-  - o alvo pertence ao mesmo grupo
-  - o alvo não é o próprio owner (não pode se rebaixar via essa tela)
-- `GRANT EXECUTE ... TO authenticated` nas duas.
+2. **Criar `public/robots.txt`** permitindo indexação da home/login e apontando para o sitemap:
+   ```
+   User-agent: *
+   Allow: /
+   Disallow: /_authenticated/
+   Sitemap: https://dre.rotadascarnes.com/sitemap.xml
+   ```
 
-### 2. Server functions (`src/lib/auth-allowlist.functions.ts` ou novo `users.functions.ts`)
+3. **Criar sitemap dinâmico** em `src/routes/sitemap[.]xml.ts` com as rotas públicas (`/`, `/auth`) usando `BASE_URL = "https://dre.rotadascarnes.com"`. Rotas autenticadas ficam fora (não devem ser indexadas).
 
-- `listGrupoUsuarios` — chama a RPC acima via `requireSupabaseAuth`.
-- `updateUsuarioPapel({ user_id, papel })` — idem.
+4. **Adicionar canonical + og:url** na rota `/auth` (única rota pública além da home) via `head()` — o `__root.tsx` já cobre o resto.
 
-### 3. UI (`src/components/settings/AccessTab.tsx`)
+5. **Adicionar JSON-LD do tipo Organization** em `__root.tsx` (nome, URL, logo) para melhorar como o Google exibe o resultado.
 
-Adicionar, abaixo da tabela atual de emails autorizados, um bloco **"Usuários vinculados"** com:
-- Tabela: Nome · Email · Papel (Select editável) · Vinculado em
-- Ao trocar o Select, chama `updateUsuarioPapel` e mostra toast.
-- O próprio admin aparece marcado como "Dono" e o Select fica desabilitado.
+6. **Corrigir findings restantes** que o scanner reportar (ex.: ajustes de title/description) e marcá-los como fixed com `seo_chat--update_findings`.
+
+7. **Orientar publicação**: mudanças de SEO só ficam visíveis para o Google após republicar o app; depois, submeter a URL no Google Search Console acelera a indexação (isso é passo manual seu, fora do Lovable).
 
 ## Fora do escopo
-
-- Remover usuário do grupo (só mudar papel por enquanto).
-- Editar nome/email do usuário.
-- Convidado escolher empresas específicas — continua vinculando todas do grupo.
-
-## Detalhes técnicos
-
-Enum existente `papel_usuario`: `admin_grupo`, `gestor_empresa`, `visualizador`. Owner do grupo é identificado por `grupos.owner_id = auth.uid()`. A leitura de email vem de `auth.users` (por isso as duas funções são `SECURITY DEFINER` com `search_path` fixo).
+- Não vou expor rotas internas do sistema (dashboard, DRE, etc.) na busca — são privadas por natureza.
+- Não vou criar landing page nova de marketing (só ajustar o SEO do que existe). Se quiser uma landing page pública descrevendo o produto para atrair buscas, me avise que planejo separado.
