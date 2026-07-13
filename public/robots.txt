@@ -1,0 +1,14 @@
+User-agent: *
+Allow: /
+Disallow: /_authenticated/
+Disallow: /dashboard
+Disallow: /despesas
+Disallow: /dre
+Disallow: /estoque
+Disallow: /fiscal
+Disallow: /importar
+Disallow: /onboarding
+Disallow: /configuracoes
+Disallow: /definir-senha
+
+Sitemap: https://dre.rotadascarnes.com/sitemap.xml
