@@ -25,6 +25,8 @@ export function AccessTab() {
   const listFn = useServerFn(listAllowedEmails);
   const addFn = useServerFn(addAllowedEmail);
   const removeFn = useServerFn(removeAllowedEmail);
+  const listUsersFn = useServerFn(listGrupoUsuarios);
+  const updatePapelFn = useServerFn(updateUsuarioPapel);
 
   const [email, setEmail] = useState("");
   const [note, setNote] = useState("");
@@ -32,6 +34,22 @@ export function AccessTab() {
   const listQ = useQuery({
     queryKey: ["allowed-emails"],
     queryFn: () => listFn(),
+  });
+
+  const usersQ = useQuery({
+    queryKey: ["grupo-usuarios"],
+    queryFn: () => listUsersFn(),
+  });
+
+  const updatePapelMut = useMutation({
+    mutationFn: (payload: { user_id: string; papel: PapelUsuario }) =>
+      updatePapelFn({ data: payload }),
+    onSuccess: () => {
+      toast.success("Papel atualizado");
+      qc.invalidateQueries({ queryKey: ["grupo-usuarios"] });
+    },
+    onError: (e: unknown) =>
+      toast.error(e instanceof Error ? e.message : "Erro ao atualizar papel"),
   });
 
   const addMut = useMutation({
