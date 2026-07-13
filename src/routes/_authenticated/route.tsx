@@ -51,6 +51,13 @@ function AuthLayout() {
     },
   });
 
+  // Redireciona para /auth se a sessão for perdida (ex.: refresh token inválido).
+  useEffect(() => {
+    if (!loading && !user) {
+      router.navigate({ to: "/auth", replace: true });
+    }
+  }, [loading, user, router]);
+
   useEffect(() => {
     if (!user) return;
     supabase
