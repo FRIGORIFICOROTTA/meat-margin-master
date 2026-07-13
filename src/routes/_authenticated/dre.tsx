@@ -9,7 +9,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { fmtBRL, fmtPct, mesNome } from "@/lib/finance";
 import { cn } from "@/lib/utils";
-import { calcularDREFiscal, calcularDREFiscalReal, normalizeRegime, REGIME_LABEL, type RegimeTributario, type ConfigTributaria } from "@/lib/fiscal";
+import { calcularDREFiscal, calcularDREFiscalReal, normalizeRegime, REGIME_LABEL, type RegimeTributario } from "@/lib/fiscal";
 import { exportDREPdf, exportDREExcel, type LinhaExport } from "@/lib/export-utils";
 import { exportMemorialCalculoPdf } from "@/lib/memorial-export";
 import { FileDown, FileSpreadsheet, Pencil, ScrollText } from "lucide-react";
@@ -25,7 +25,7 @@ function DrePage() {
   const [empresaId] = useEmpresaSelecionada();
   const [periodo] = usePeriodo();
   const [modo, setModo] = useState<"gerencial" | "fiscal">("gerencial");
-  const [fiscalSrc, setFiscalSrc] = useState<"estimado" | "real">("estimado");
+  const [fiscalSrc, setFiscalSrc] = useState<"estimado" | "real">("real");
   const [editing, setEditing] = useState(false);
   const qc = useQueryClient();
 
@@ -82,7 +82,7 @@ function DrePage() {
     total_despesas: Number(dre.total_despesas),
     devolucoes: Number(dre.devolucoes ?? 0),
   };
-  const cfg = (empresa?.config_tributaria as ConfigTributaria | null) ?? null;
+  const cfg = (empresa?.config_tributaria as Record<string, unknown> | null) ?? null;
   const fiscalEstimado = calcularDREFiscal(dreInput, regime, cfg);
   const fiscalReal = calcularDREFiscalReal(dreInput, regime, cfg, lancamentos as any);
   const fiscal = fiscalSrc === "real" ? fiscalReal : fiscalEstimado;

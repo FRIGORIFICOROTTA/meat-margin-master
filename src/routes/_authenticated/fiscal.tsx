@@ -158,13 +158,36 @@ function FiscalPage() {
       if (row.id) {
         const { error } = await supabase.from("lancamentos_fiscais").update(payload).eq("id", row.id);
         if (error) throw error;
-      } else {
-        const { error } = await supabase.from("lancamentos_fiscais").insert(payload);
-        if (error) throw error;
+        return row.id;
       }
+      // Novo lançamento: devolve o id para o estado local, evitando duplicata
+      // ao salvar a mesma linha uma segunda vez.
+      const { data, error } = await supabase
+        .from("lancamentos_fiscais")
+        .insert(payload)
+        .select("id")
+        .single();
+      if (error) throw error;
+      return data.id as string;
     },
     onSuccess: () => {
       toast.success("Lançamento salvo.");
+      qc.invalidateQueries({ queryKey: ["fiscal-ctx"] });
+      qc.invalidateQueries({ queryKey: ["dre-full"] });
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : "Erro ao salvar"),
+  });
+
+  /** Salva de uma vez todas as linhas com valor lançado (ou já salvas). */
+  const salvarTudoMut = useMutation({
+    mutationFn: async () => {
+      const alvos = rows.filter((r) => r.id || (r.valor_real ?? 0) !== 0);
+      if (alvos.length === 0) throw new Error("Nenhum valor lançado para salvar.");
+      for (const r of alvos) await saveMut.mutateAsync(r);
+      return alvos.length;
+    },
+    onSuccess: (n) => {
+      toast.success(`${n} lançamento(s) salvo(s).`);
       qc.invalidateQueries({ queryKey: ["fiscal-ctx"] });
       qc.invalidateQueries({ queryKey: ["dre-full"] });
     },
@@ -261,10 +284,26 @@ function FiscalPage() {
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle>Tributos do período</CardTitle>
-          <Button size="sm" variant="outline" onClick={addOutro}>
-            <Plus className="h-4 w-4 mr-1" /> Adicionar ajuste/outro
-          </Button>
+          <div>
+            <CardTitle>Tributos do período</CardTitle>
+            <p className="text-xs text-muted-foreground mt-1">
+              Digite o <strong>Valor Real</strong> pago e clique em <strong>Salvar tudo</strong>. Só
+              lançamentos salvos entram na DRE Fiscal (aba "Real").
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" onClick={addOutro}>
+              <Plus className="h-4 w-4 mr-1" /> Adicionar ajuste/outro
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => salvarTudoMut.mutate()}
+              disabled={salvarTudoMut.isPending || saveMut.isPending}
+            >
+              <Save className="h-4 w-4 mr-1" />
+              {salvarTudoMut.isPending ? "Salvando..." : "Salvar tudo"}
+            </Button>
+          </div>
         </CardHeader>
         <CardContent className="p-0">
           <table className="w-full text-sm">
@@ -288,6 +327,16 @@ function FiscalPage() {
                   <tr key={`${r.tipo}-${i}`} className="border-b align-top">
                     <td className="p-3">
                       <div className="font-medium">{TRIBUTO_LABEL[r.tipo]}</div>
+                      {!r.id && (r.valor_real ?? 0) !== 0 && (
+                        <span className="mt-1 inline-block rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800">
+                          não salvo
+                        </span>
+                      )}
+                      {r.id && (
+                        <span className="mt-1 inline-block rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-800">
+                          salvo · na DRE
+                        </span>
+                      )}
                       {isOutro && (
                         <Input
                           className="mt-1 h-8 text-xs"
@@ -351,8 +400,8 @@ function FiscalPage() {
                             =
                           </Button>
                         )}
-                        <Button size="sm" onClick={() => saveMut.mutate(r)} disabled={saveMut.isPending} title="Salvar">
-                          <Save className="h-4 w-4" />
+                        <Button size="sm" onClick={() => saveMut.mutate(r)} disabled={saveMut.isPending} title="Salvar esta linha">
+                          <Save className="h-4 w-4 mr-1" /> Salvar
                         </Button>
                         {isOutro ? (
                           <Button
