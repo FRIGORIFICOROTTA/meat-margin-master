@@ -586,6 +586,7 @@ export type Database = {
     }
     Functions: {
       is_admin: { Args: never; Returns: boolean }
+      link_invited_user: { Args: never; Returns: Json }
       user_has_empresa_access: {
         Args: { _empresa_id: string }
         Returns: boolean
