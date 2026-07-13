@@ -587,6 +587,24 @@ export type Database = {
     Functions: {
       is_admin: { Args: never; Returns: boolean }
       link_invited_user: { Args: never; Returns: Json }
+      list_grupo_usuarios: {
+        Args: never
+        Returns: {
+          created_at: string
+          email: string
+          grupo_id: string
+          nome: string
+          papel: Database["public"]["Enums"]["papel_usuario"]
+          user_id: string
+        }[]
+      }
+      update_usuario_papel: {
+        Args: {
+          _papel: Database["public"]["Enums"]["papel_usuario"]
+          _user_id: string
+        }
+        Returns: undefined
+      }
       user_has_empresa_access: {
         Args: { _empresa_id: string }
         Returns: boolean
