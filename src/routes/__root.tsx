@@ -99,6 +99,20 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
         rel: "stylesheet",
         href: appCss,
       },
+      { rel: "canonical", href: "https://dre.rotadascarnes.com/" },
+    ],
+    scripts: [
+      {
+        type: "application/ld+json",
+        children: JSON.stringify({
+          "@context": "https://schema.org",
+          "@type": "Organization",
+          name: "Rota das Carnes",
+          url: "https://dre.rotadascarnes.com",
+          description:
+            "DRE Inteligente da Rota das Carnes — plataforma de gestão de resultados, despesas, estoque e fiscal.",
+        }),
+      },
     ],
   }),
   shellComponent: RootShell,
