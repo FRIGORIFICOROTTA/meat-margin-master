@@ -55,6 +55,17 @@ function AuthLayout() {
     },
   });
 
+  if (empresasQ.error) {
+    return (
+      <div className="relative min-h-screen bg-background px-4 py-8">
+        <Watermark />
+        <main className="relative z-10 mx-auto max-w-7xl">
+          <RouteErrorCard error={empresasQ.error as Error} reset={() => empresasQ.refetch()} page="empresas-header" />
+        </main>
+      </div>
+    );
+  }
+
   // Redireciona para /auth se a sessão for perdida (ex.: refresh token inválido).
   useEffect(() => {
     if (!loading && !user) {
