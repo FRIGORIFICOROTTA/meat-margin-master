@@ -3,6 +3,28 @@
 
 export type RegimeTributario = "simples" | "presumido" | "real";
 
+/** Valores possíveis vindos do banco (enum public.regime_tributario) ou do código. */
+export type RegimeTributarioDB = RegimeTributario | "gerencial" | "lucro_real";
+
+/**
+ * Normaliza o regime vindo do banco para o regime de cálculo.
+ * O enum do Postgres é ('gerencial','lucro_real'); o Grupo Rota opera sob Lucro Real,
+ * então ambos calculam como 'real' — 'gerencial' indica apenas que a empresa ainda
+ * não formalizou a camada fiscal (estimativas devem ser validadas pelo contador).
+ */
+export function normalizeRegime(raw: string | null | undefined): RegimeTributario {
+  switch (raw) {
+    case "simples":
+    case "presumido":
+    case "real":
+      return raw;
+    case "lucro_real":
+    case "gerencial":
+    default:
+      return "real";
+  }
+}
+
 export type ConfigTributaria = {
   // Percentuais em decimal (ex.: 0.04 = 4%)
   aliquota_simples?: number; // DAS total estimado
@@ -12,10 +34,62 @@ export type ConfigTributaria = {
   iss?: number;
   irpj?: number;
   csll?: number;
+  // Adicional de IRPJ (Lucro Real/Presumido): 10% sobre o lucro que exceder
+  // R$ 20.000/mês (art. 3º, §1º, Lei 9.249/95).
+  adicional_irpj?: number; // ex.: 0.10
+  adicional_irpj_limite?: number; // ex.: 20000 (mensal)
   // Presunção para Lucro Presumido (base de cálculo IR/CSLL sobre receita)
   presuncao_irpj?: number; // ex.: 0.08
   presuncao_csll?: number; // ex.: 0.12
+  // PIS/COFINS não-cumulativo (Lucro Real):
+  // Proporção da receita sujeita a débito de PIS/COFINS. Carnes bovinas, suínas
+  // e aves têm alíquota ZERO na venda (Lei 12.839/2013 — cesta básica); para um
+  // açougue, boa parte da receita não gera débito. Default 1 (100%) por prudência —
+  // ajustar com o contador por empresa.
+  pis_cofins_pct_receita_tributada?: number; // 0..1
+  // Proporção das compras/CMV que gera crédito de PIS/COFINS (insumos com direito
+  // a crédito). Default 0 (conservador) — ajustar com o contador.
+  pis_cofins_pct_base_credito?: number; // 0..1
 };
+
+/**
+ * Normaliza as chaves do jsonb `empresas.config_tributaria`.
+ * O banco grava `aliquota_pis`, `aliquota_cofins`, `aliquota_icms`, `aliquota_irpj`,
+ * `aliquota_csll`, `adicional_irpj`, `adicional_irpj_limite`; o código usa chaves curtas.
+ * Aceita ambos os formatos (chaves curtas têm precedência).
+ */
+export function normalizeConfig(raw: Record<string, unknown> | null | undefined): ConfigTributaria {
+  if (!raw) return {};
+  const r = raw as Record<string, number | undefined>;
+  const out: ConfigTributaria = {};
+  const pick = (...keys: string[]): number | undefined => {
+    for (const k of keys) {
+      const v = r[k];
+      if (typeof v === "number" && isFinite(v)) return v;
+    }
+    return undefined;
+  };
+  const map: Array<[keyof ConfigTributaria, string[]]> = [
+    ["aliquota_simples", ["aliquota_simples"]],
+    ["pis", ["pis", "aliquota_pis"]],
+    ["cofins", ["cofins", "aliquota_cofins"]],
+    ["icms", ["icms", "aliquota_icms"]],
+    ["iss", ["iss", "aliquota_iss"]],
+    ["irpj", ["irpj", "aliquota_irpj"]],
+    ["csll", ["csll", "aliquota_csll"]],
+    ["adicional_irpj", ["adicional_irpj"]],
+    ["adicional_irpj_limite", ["adicional_irpj_limite"]],
+    ["presuncao_irpj", ["presuncao_irpj"]],
+    ["presuncao_csll", ["presuncao_csll"]],
+    ["pis_cofins_pct_receita_tributada", ["pis_cofins_pct_receita_tributada"]],
+    ["pis_cofins_pct_base_credito", ["pis_cofins_pct_base_credito"]],
+  ];
+  for (const [dest, keys] of map) {
+    const v = pick(...keys);
+    if (v !== undefined) (out as Record<string, number>)[dest] = v;
+  }
+  return out;
+}
 
 export const DEFAULTS: Record<RegimeTributario, ConfigTributaria> = {
   simples: { aliquota_simples: 0.06 },
@@ -34,6 +108,10 @@ export const DEFAULTS: Record<RegimeTributario, ConfigTributaria> = {
     icms: 0.18,
     irpj: 0.15,
     csll: 0.09,
+    adicional_irpj: 0.1,
+    adicional_irpj_limite: 20000,
+    pis_cofins_pct_receita_tributada: 1,
+    pis_cofins_pct_base_credito: 0,
   },
 };
 
@@ -65,9 +143,18 @@ export type DREFiscal = {
 
 export function mergeConfig(
   regime: RegimeTributario,
-  config: ConfigTributaria | null | undefined,
+  config: ConfigTributaria | Record<string, unknown> | null | undefined,
 ): ConfigTributaria {
-  return { ...DEFAULTS[regime], ...(config ?? {}) };
+  return { ...DEFAULTS[regime], ...normalizeConfig(config as Record<string, unknown> | null) };
+}
+
+/** IRPJ mensal: 15% sobre a base + adicional de 10% sobre o que exceder R$ 20.000/mês. */
+export function calcularIRPJ(base: number, cfg: ConfigTributaria): number {
+  const b = Math.max(base, 0);
+  const principal = b * (cfg.irpj ?? 0.15);
+  const limite = cfg.adicional_irpj_limite ?? 20000;
+  const adicional = Math.max(b - limite, 0) * (cfg.adicional_irpj ?? 0.1);
+  return principal + adicional;
 }
 
 export function calcularDREFiscal(
@@ -88,8 +175,15 @@ export function calcularDREFiscal(
     impostos_breakdown.push({ label: "DAS (Simples Nacional)", valor: v });
     impostos_total = v;
   } else {
-    const pis = base * (cfg.pis ?? 0);
-    const cofins = base * (cfg.cofins ?? 0);
+    // PIS/COFINS: no Lucro Real (não-cumulativo) o débito incide só sobre a
+    // parcela tributada da receita (carnes = alíquota zero, Lei 12.839/2013)
+    // e há crédito sobre insumos. Débito líquido = débito − crédito, piso zero.
+    const pctTrib = regime === "real" ? (cfg.pis_cofins_pct_receita_tributada ?? 1) : 1;
+    const basePisCofins = base * pctTrib;
+    const pctCred = regime === "real" ? (cfg.pis_cofins_pct_base_credito ?? 0) : 0;
+    const baseCredito = Math.max(dre.cmv + dre.variacao_estoque, 0) * pctCred;
+    const pis = Math.max(basePisCofins * (cfg.pis ?? 0) - baseCredito * (cfg.pis ?? 0), 0);
+    const cofins = Math.max(basePisCofins * (cfg.cofins ?? 0) - baseCredito * (cfg.cofins ?? 0), 0);
     const icms = base * (cfg.icms ?? 0);
     impostos_breakdown.push(
       { label: "PIS", valor: pis },
@@ -121,11 +215,13 @@ export function calcularDREFiscal(
   if (regime === "presumido") {
     const baseIR = base * (cfg.presuncao_irpj ?? 0.08);
     const baseCSLL = base * (cfg.presuncao_csll ?? 0.12);
-    irpj = baseIR * (cfg.irpj ?? 0.15);
+    irpj = calcularIRPJ(baseIR, cfg);
     csll = baseCSLL * (cfg.csll ?? 0.09);
   } else if (regime === "real") {
+    // ATENÇÃO: base estimada = lucro gerencial. A base legal do Lucro Real é o
+    // lucro contábil ajustado (LALUR) — a apuração definitiva exige o contador.
     const baseLucro = Math.max(lucro_antes_ir, 0);
-    irpj = baseLucro * (cfg.irpj ?? 0.15);
+    irpj = calcularIRPJ(baseLucro, cfg);
     csll = baseLucro * (cfg.csll ?? 0.09);
   }
 
@@ -239,8 +335,6 @@ export function calcularDREFiscalReal(
       impostos_breakdown.push({ label: LABEL_TRIBUTO.iss, valor: v });
       impostos_oper_total += v;
     }
-    irpj_real = resolveTipo("irpj", estimado.irpj);
-    csll_real = resolveTipo("csll", estimado.csll);
   }
 
   if (ajustes_outros !== 0) {
@@ -256,6 +350,20 @@ export function calcularDREFiscalReal(
   const lucro_bruto = receita_liquida - cmv_ajustado;
   const despesas_operacionais = dre.total_despesas;
   const lucro_antes_ir = lucro_bruto - despesas_operacionais;
+
+  // IRPJ/CSLL: se não há lançamento real, estima sobre o lucro apurado COM os
+  // tributos operacionais reais (e não sobre o lucro da estimativa pura).
+  if (regime !== "simples") {
+    const cfg = mergeConfig(regime, configRaw);
+    const baseLucroReal = Math.max(lucro_antes_ir, 0);
+    const irpjEstAtualizado =
+      regime === "real" ? calcularIRPJ(baseLucroReal, cfg) : estimado.irpj;
+    const csllEstAtualizado =
+      regime === "real" ? baseLucroReal * (cfg.csll ?? 0.09) : estimado.csll;
+    irpj_real = resolveTipo("irpj", irpjEstAtualizado);
+    csll_real = resolveTipo("csll", csllEstAtualizado);
+  }
+
   const resultado_liquido_fiscal = lucro_antes_ir - irpj_real - csll_real;
 
   // ignora tributos que de fato deveriam existir mas estão zerados na estimativa também

@@ -9,7 +9,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { fmtBRL, fmtPct, mesNome } from "@/lib/finance";
 import { cn } from "@/lib/utils";
-import { calcularDREFiscal, calcularDREFiscalReal, REGIME_LABEL, type RegimeTributario, type ConfigTributaria } from "@/lib/fiscal";
+import { calcularDREFiscal, calcularDREFiscalReal, normalizeRegime, REGIME_LABEL, type RegimeTributario, type ConfigTributaria } from "@/lib/fiscal";
 import { exportDREPdf, exportDREExcel, type LinhaExport } from "@/lib/export-utils";
 import { exportMemorialCalculoPdf } from "@/lib/memorial-export";
 import { FileDown, FileSpreadsheet, Pencil, ScrollText } from "lucide-react";
@@ -74,7 +74,7 @@ function DrePage() {
   }
 
   const { empresa, dre, despesas, lancamentos } = dreQ.data;
-  const regime = (empresa?.regime_tributario as RegimeTributario) ?? "simples";
+  const regime: RegimeTributario = normalizeRegime(empresa?.regime_tributario);
   const dreInput = {
     total_vendas: Number(dre.total_vendas),
     cmv: Number(dre.cmv),

@@ -19,13 +19,12 @@ export const checkEmailAllowed = createServerFn({ method: "POST" })
   )
   .handler(async ({ data }) => {
     const supabase = publicClient();
-    const { data: row, error } = await supabase
-      .from("allowed_emails")
-      .select("email")
-      .eq("email", data.email)
-      .maybeSingle();
+    // RPC boolean: não expõe a lista de e-mails (correção de segurança 13/07/2026).
+    const { data: allowed, error } = await supabase.rpc("email_is_allowed", {
+      p_email: data.email,
+    });
     if (error) throw error;
-    return { allowed: !!row };
+    return { allowed: !!allowed };
   });
 
 /** Admin: lista todos os emails autorizados. */

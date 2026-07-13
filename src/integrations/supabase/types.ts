@@ -585,6 +585,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      email_is_allowed: { Args: { p_email: string }; Returns: boolean }
       is_admin: { Args: never; Returns: boolean }
       link_invited_user: { Args: never; Returns: Json }
       list_grupo_usuarios: {

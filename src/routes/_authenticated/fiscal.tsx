@@ -13,6 +13,7 @@ import {
   TRIBUTO_LABEL,
   estimativaPorTributo,
   tributosDoRegime,
+  normalizeRegime,
   REGIME_LABEL,
   type ConfigTributaria,
   type RegimeTributario,
@@ -69,7 +70,7 @@ function FiscalPage() {
     },
   });
 
-  const regime: RegimeTributario = (ctx.data?.empresa?.regime_tributario as RegimeTributario) ?? "simples";
+  const regime: RegimeTributario = normalizeRegime(ctx.data?.empresa?.regime_tributario);
   const cfg = (ctx.data?.empresa?.config_tributaria as ConfigTributaria | null) ?? null;
   const dre = ctx.data?.dre;
 
