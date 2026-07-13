@@ -50,6 +50,10 @@ export type ConfigTributaria = {
   // Proporção das compras/CMV que gera crédito de PIS/COFINS (insumos com direito
   // a crédito). Default 0 (conservador) — ajustar com o contador.
   pis_cofins_pct_base_credito?: number; // 0..1
+  // Se false, o cálculo fiscal NÃO usa estimativas automáticas como fallback:
+  // apenas lançamentos manuais entram na DRE Fiscal (estimativas ficam só como
+  // referência visual). Default true.
+  estimativas_habilitadas?: boolean;
 };
 
 /**
@@ -87,6 +91,9 @@ export function normalizeConfig(raw: Record<string, unknown> | null | undefined)
   for (const [dest, keys] of map) {
     const v = pick(...keys);
     if (v !== undefined) (out as Record<string, number>)[dest] = v;
+  }
+  if (typeof (raw as Record<string, unknown>).estimativas_habilitadas === "boolean") {
+    out.estimativas_habilitadas = (raw as Record<string, unknown>).estimativas_habilitadas as boolean;
   }
   return out;
 }
@@ -282,6 +289,11 @@ export function calcularDREFiscalReal(
   lancamentos: LancamentoFiscal[],
 ): DREFiscalReal {
   const estimado = calcularDREFiscal(dre, regime, configRaw);
+  // Modo opcional: com estimativas desativadas, apenas lançamentos manuais
+  // compõem a DRE Fiscal; a estimativa vira 0 no fallback (segue visível como
+  // referência na coluna "Estimado" da tela).
+  const usarEstimativas =
+    normalizeConfig(configRaw as Record<string, unknown> | null).estimativas_habilitadas !== false;
 
   // Map tipo -> soma de lançamentos reais (sinal aplicado)
   const realPorTipo = new Map<TipoLancamentoFiscal, number>();
@@ -314,7 +326,7 @@ export function calcularDREFiscalReal(
     }
     if (estimadoValor > 0) faltando.push(tipo);
     origem[tipo] = "estimado";
-    return estimadoValor;
+    return usarEstimativas ? estimadoValor : 0;
   }
 
   if (regime === "simples") {

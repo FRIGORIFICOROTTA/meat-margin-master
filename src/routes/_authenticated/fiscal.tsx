@@ -14,13 +14,17 @@ import {
   estimativaPorTributo,
   tributosDoRegime,
   normalizeRegime,
+  normalizeConfig,
+  mergeConfig,
   REGIME_LABEL,
   type ConfigTributaria,
   type RegimeTributario,
   type TipoLancamentoFiscal,
 } from "@/lib/fiscal";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import { Plus, Trash2, Save, Info, ChevronDown } from "lucide-react";
+import { Plus, Trash2, Save, Info, ChevronDown, Percent } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/fiscal")({
   component: FiscalPage,
@@ -238,6 +242,16 @@ function FiscalPage() {
 
       <HelpCard />
 
+      <ConfigTributariaCard
+        empresaId={empresaId}
+        regime={regime}
+        cfgRaw={ctx.data?.empresa?.config_tributaria as Record<string, unknown> | null}
+        onSaved={() => {
+          qc.invalidateQueries({ queryKey: ["fiscal-ctx"] });
+          qc.invalidateQueries({ queryKey: ["dre-full"] });
+        }}
+      />
+
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <Stat label="Total Estimado" valor={totalEst} />
@@ -374,6 +388,162 @@ function FiscalPage() {
       </Card>
 
     </div>
+  );
+}
+
+// --- Editor de alíquotas e parâmetros tributários (empresas.config_tributaria) ---
+
+type CfgField = {
+  key: keyof ConfigTributaria;
+  label: string;
+  hint?: string;
+  kind: "pct" | "brl";
+};
+
+const CFG_FIELDS: CfgField[] = [
+  { key: "pis", label: "PIS", kind: "pct" },
+  { key: "cofins", label: "COFINS", kind: "pct" },
+  { key: "icms", label: "ICMS", kind: "pct" },
+  { key: "irpj", label: "IRPJ", kind: "pct" },
+  { key: "adicional_irpj", label: "Adicional IRPJ", hint: "Sobre o lucro acima do limite mensal", kind: "pct" },
+  { key: "adicional_irpj_limite", label: "Limite do adicional (R$/mês)", hint: "Lei 9.249/95: R$ 20.000", kind: "brl" },
+  { key: "csll", label: "CSLL", kind: "pct" },
+  {
+    key: "pis_cofins_pct_receita_tributada",
+    label: "% da receita tributada por PIS/COFINS",
+    hint: "Carnes têm alíquota zero (Lei 12.839/2013) — definir com o contador",
+    kind: "pct",
+  },
+  {
+    key: "pis_cofins_pct_base_credito",
+    label: "% das compras com crédito PIS/COFINS",
+    hint: "Insumos com direito a crédito — definir com o contador",
+    kind: "pct",
+  },
+];
+
+function ConfigTributariaCard({
+  empresaId,
+  regime,
+  cfgRaw,
+  onSaved,
+}: {
+  empresaId: string;
+  regime: RegimeTributario;
+  cfgRaw: Record<string, unknown> | null;
+  onSaved: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const efetiva = mergeConfig(regime, cfgRaw); // defaults + config da empresa
+  const [draft, setDraft] = useState<Record<string, string>>({});
+  const [estimativas, setEstimativas] = useState<boolean>(efetiva.estimativas_habilitadas !== false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setEstimativas(mergeConfig(regime, cfgRaw).estimativas_habilitadas !== false);
+    setDraft({});
+  }, [cfgRaw, regime, empresaId]);
+
+  function shown(f: CfgField): string {
+    if (draft[f.key] !== undefined) return draft[f.key];
+    const v = efetiva[f.key];
+    if (typeof v !== "number") return "";
+    return f.kind === "pct" ? String(+(v * 100).toFixed(4)) : String(v);
+  }
+
+  async function salvar() {
+    setSaving(true);
+    try {
+      // Parte da config já normalizada da empresa (preserva o que não está no formulário)
+      const atual = normalizeConfig(cfgRaw);
+      const novo: Record<string, number | boolean> = { ...atual } as Record<string, number | boolean>;
+      for (const f of CFG_FIELDS) {
+        const raw = draft[f.key] !== undefined ? draft[f.key] : shown(f);
+        if (raw === "") continue;
+        const n = Number(String(raw).replace(",", "."));
+        if (!isFinite(n) || n < 0) {
+          toast.error(`Valor inválido em "${f.label}".`);
+          setSaving(false);
+          return;
+        }
+        novo[f.key] = f.kind === "pct" ? n / 100 : n;
+      }
+      novo.estimativas_habilitadas = estimativas;
+      const { error } = await supabase
+        .from("empresas")
+        .update({ config_tributaria: novo })
+        .eq("id", empresaId);
+      if (error) throw error;
+      toast.success("Alíquotas salvas.");
+      setDraft({});
+      onSaved();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erro ao salvar alíquotas");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader
+        className="flex flex-row items-center justify-between cursor-pointer select-none py-3"
+        onClick={() => setOpen((o) => !o)}
+      >
+        <CardTitle className="text-base flex items-center gap-2">
+          <Percent className="h-4 w-4" /> Alíquotas e parâmetros do cálculo
+        </CardTitle>
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-muted-foreground">
+            Estimativas {estimativas ? "ativadas" : "desativadas"}
+          </span>
+          <ChevronDown className={cn("h-4 w-4 transition-transform", open && "rotate-180")} />
+        </div>
+      </CardHeader>
+      {open && (
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between rounded border p-3">
+            <div>
+              <Label htmlFor="sw-estimativas" className="font-medium">
+                Usar estimativas automáticas no cálculo fiscal
+              </Label>
+              <p className="text-xs text-muted-foreground mt-1">
+                Desativado: apenas os lançamentos manuais compõem a DRE Fiscal; as estimativas
+                permanecem visíveis como referência na coluna "Estimado".
+              </p>
+            </div>
+            <Switch id="sw-estimativas" checked={estimativas} onCheckedChange={setEstimativas} />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {CFG_FIELDS.map((f) => (
+              <div key={f.key} className="space-y-1">
+                <Label htmlFor={`cfg-${f.key}`} className="text-xs">
+                  {f.label} {f.kind === "pct" ? "(%)" : ""}
+                </Label>
+                <Input
+                  id={`cfg-${f.key}`}
+                  inputMode="decimal"
+                  value={shown(f)}
+                  onChange={(e) => setDraft((d) => ({ ...d, [f.key]: e.target.value }))}
+                />
+                {f.hint && <p className="text-[11px] text-muted-foreground">{f.hint}</p>}
+              </div>
+            ))}
+          </div>
+
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-muted-foreground">
+              Valores em % (ex.: 1,65). Estimativas são provisão gerencial — a apuração
+              definitiva de IRPJ/CSLL (LALUR) é do contador.
+            </p>
+            <Button size="sm" onClick={salvar} disabled={saving}>
+              <Save className="h-4 w-4 mr-1" /> {saving ? "Salvando..." : "Salvar alíquotas"}
+            </Button>
+          </div>
+        </CardContent>
+      )}
+    </Card>
   );
 }
 
