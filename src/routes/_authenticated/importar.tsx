@@ -32,8 +32,13 @@ const TIPOS: { key: TipoArquivo; label: string; desc: string }[] = [
   { key: "estoque_final", label: "Estoque Final", desc: "Inventário no fim do período" },
 ];
 
+import { RouteErrorCard } from "@/components/RouteErrorCard";
+
 export const Route = createFileRoute("/_authenticated/importar")({
   component: Importar,
+  errorComponent: ({ error, reset }) => (
+    <RouteErrorCard error={error} reset={reset} page="importar" />
+  ),
 });
 
 interface DreExtracted {

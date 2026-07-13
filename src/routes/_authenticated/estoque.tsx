@@ -8,8 +8,13 @@ import { fmtBRL, fmtNum, mesNome, categorizarProduto } from "@/lib/finance";
 import { useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
 
+import { RouteErrorCard } from "@/components/RouteErrorCard";
+
 export const Route = createFileRoute("/_authenticated/estoque")({
   component: EstoquePage,
+  errorComponent: ({ error, reset }) => (
+    <RouteErrorCard error={error} reset={reset} page="estoque" />
+  ),
 });
 
 function EstoquePage() {
@@ -21,19 +26,21 @@ function EstoquePage() {
     queryKey: ["estoque", empresaId, periodo.mes, periodo.ano],
     enabled: !!empresaId,
     queryFn: async () => {
-      const { data: snaps } = await supabase
+      const { data: snaps, error: snapErr } = await supabase
         .from("inventario_snapshot")
         .select("*")
         .eq("empresa_id", empresaId!)
         .is("deleted_at", null)
         .order("data_referencia");
+      if (snapErr) throw snapErr;
       const snapList = snaps ?? [];
       const all = await Promise.all(
         snapList.map(async (s) => {
-          const { data: itens } = await supabase
+          const { data: itens, error: itErr } = await supabase
             .from("inventario_itens")
             .select("*")
             .eq("snapshot_id", s.id);
+          if (itErr) throw itErr;
           return { snap: s, itens: itens ?? [] };
         }),
       );
