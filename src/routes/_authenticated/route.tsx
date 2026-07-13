@@ -17,6 +17,7 @@ import { Toaster } from "sonner";
 import { LayoutDashboard, Upload, FileBarChart2, Boxes, Settings, LogOut, Receipt, Landmark } from "lucide-react";
 import { BrandLogo } from "@/components/brand/BrandLogo";
 import { Watermark } from "@/components/brand/Watermark";
+import { RouteErrorCard } from "@/components/RouteErrorCard";
 
 export const Route = createFileRoute("/_authenticated")({
   ssr: false,
@@ -28,6 +29,9 @@ export const Route = createFileRoute("/_authenticated")({
     return { user: data.user };
   },
   component: AuthLayout,
+  errorComponent: ({ error, reset }) => (
+    <RouteErrorCard error={error} reset={reset} page="auth-layout" />
+  ),
 });
 
 function AuthLayout() {
