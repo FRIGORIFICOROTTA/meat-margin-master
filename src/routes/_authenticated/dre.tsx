@@ -16,8 +16,13 @@ import { FileDown, FileSpreadsheet, Pencil, ScrollText } from "lucide-react";
 import { DreEditor, type DreFormValues, emptyDreValues } from "@/components/DreEditor";
 import { toast } from "sonner";
 
+import { RouteErrorCard } from "@/components/RouteErrorCard";
+
 export const Route = createFileRoute("/_authenticated/dre")({
   component: DrePage,
+  errorComponent: ({ error, reset }) => (
+    <RouteErrorCard error={error} reset={reset} page="dre" />
+  ),
 });
 
 
@@ -34,12 +39,13 @@ function DrePage() {
     queryKey: ["dre-full", empresaId, periodo.mes, periodo.ano],
     enabled: !!empresaId,
     queryFn: async () => {
-      const { data: empresa } = await supabase
+      const { data: empresa, error: empErr } = await supabase
         .from("empresas")
         .select("id, nome, cnpj, regime_tributario, config_tributaria")
         .eq("id", empresaId!)
         .maybeSingle();
-      const { data: dre } = await supabase
+      if (empErr) throw empErr;
+      const { data: dre, error: dreErr } = await supabase
         .from("dre_mensal")
         .select("*")
         .eq("empresa_id", empresaId!)
@@ -47,18 +53,21 @@ function DrePage() {
         .eq("ano", periodo.ano)
         .is("deleted_at", null)
         .maybeSingle();
-      if (!dre) return { empresa, dre: null, despesas: [] as any[] };
-      const { data: despesas } = await supabase
+      if (dreErr) throw dreErr;
+      if (!dre) return { empresa, dre: null, despesas: [] as any[], lancamentos: [] as any[] };
+      const { data: despesas, error: despErr } = await supabase
         .from("despesas_detalhe")
         .select("*")
         .eq("dre_id", dre.id);
-      const { data: lancamentos } = await supabase
+      if (despErr) throw despErr;
+      const { data: lancamentos, error: lancErr } = await supabase
         .from("lancamentos_fiscais")
         .select("tipo, label, valor_real, sinal")
         .eq("empresa_id", empresaId!)
         .eq("mes", periodo.mes)
         .eq("ano", periodo.ano)
         .is("deleted_at", null);
+      if (lancErr) throw lancErr;
       return { empresa, dre, despesas: despesas ?? [], lancamentos: lancamentos ?? [] };
     },
   });

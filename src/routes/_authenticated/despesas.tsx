@@ -6,8 +6,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { fmtBRL, fmtPct, mesNome } from "@/lib/finance";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from "recharts";
 
+import { RouteErrorCard } from "@/components/RouteErrorCard";
+
 export const Route = createFileRoute("/_authenticated/despesas")({
   component: DespesasPage,
+  errorComponent: ({ error, reset }) => (
+    <RouteErrorCard error={error} reset={reset} page="despesas" />
+  ),
 });
 
 const PALETTE = [
@@ -29,7 +34,7 @@ function DespesasPage() {
     queryKey: ["despesas", empresaId, periodo.mes, periodo.ano],
     enabled: !!empresaId,
     queryFn: async () => {
-      const { data: dre } = await supabase
+      const { data: dre, error: dreErr } = await supabase
         .from("dre_mensal")
         .select("id, total_vendas")
         .eq("empresa_id", empresaId!)
@@ -37,11 +42,13 @@ function DespesasPage() {
         .eq("ano", periodo.ano)
         .is("deleted_at", null)
         .maybeSingle();
+      if (dreErr) throw dreErr;
       if (!dre) return null;
-      const { data: despesas } = await supabase
+      const { data: despesas, error: despErr } = await supabase
         .from("despesas_detalhe")
         .select("*")
         .eq("dre_id", dre.id);
+      if (despErr) throw despErr;
       return { receita: Number(dre.total_vendas), despesas: despesas ?? [] };
     },
   });

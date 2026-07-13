@@ -18,8 +18,13 @@ import { GoogleIcon } from "@/components/auth/GoogleIcon";
 import { AccessTab } from "@/components/settings/AccessTab";
 import { GoogleAuthTab } from "@/components/settings/GoogleAuthTab";
 
+import { RouteErrorCard } from "@/components/RouteErrorCard";
+
 export const Route = createFileRoute("/_authenticated/configuracoes")({
   component: ConfigPage,
+  errorComponent: ({ error, reset }) => (
+    <RouteErrorCard error={error} reset={reset} page="configuracoes" />
+  ),
 });
 
 const empresaSchema = z.object({

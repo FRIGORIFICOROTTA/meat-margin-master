@@ -16,8 +16,13 @@ import {
   Legend,
 } from "recharts";
 
+import { RouteErrorCard } from "@/components/RouteErrorCard";
+
 export const Route = createFileRoute("/_authenticated/dashboard")({
   component: Dashboard,
+  errorComponent: ({ error, reset }) => (
+    <RouteErrorCard error={error} reset={reset} page="dashboard" />
+  ),
 });
 
 function Dashboard() {
@@ -28,13 +33,14 @@ function Dashboard() {
     queryKey: ["dash", empresaId, periodo.mes, periodo.ano],
     enabled: !!empresaId,
     queryFn: async () => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("dre_mensal")
         .select("mes, ano, total_vendas, cmv, resultado_liquido_gerencial, variacao_estoque, total_despesas")
         .eq("empresa_id", empresaId!)
         .is("deleted_at", null)
         .order("ano", { ascending: true })
         .order("mes", { ascending: true });
+      if (error) throw error;
       return data ?? [];
     },
   });

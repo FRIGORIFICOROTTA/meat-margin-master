@@ -26,8 +26,13 @@ import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { Plus, Trash2, Save, Info, ChevronDown, Percent } from "lucide-react";
 
+import { RouteErrorCard } from "@/components/RouteErrorCard";
+
 export const Route = createFileRoute("/_authenticated/fiscal")({
   component: FiscalPage,
+  errorComponent: ({ error, reset }) => (
+    <RouteErrorCard error={error} reset={reset} page="fiscal" />
+  ),
 });
 
 type LancRow = {
@@ -49,12 +54,13 @@ function FiscalPage() {
     queryKey: ["fiscal-ctx", empresaId, periodo.mes, periodo.ano],
     enabled: !!empresaId,
     queryFn: async () => {
-      const { data: empresa } = await supabase
+      const { data: empresa, error: empErr } = await supabase
         .from("empresas")
         .select("id, nome, regime_tributario, config_tributaria")
         .eq("id", empresaId!)
         .maybeSingle();
-      const { data: dre } = await supabase
+      if (empErr) throw empErr;
+      const { data: dre, error: dreErr } = await supabase
         .from("dre_mensal")
         .select("total_vendas, devolucoes, cmv, variacao_estoque, total_despesas")
         .eq("empresa_id", empresaId!)
@@ -62,7 +68,8 @@ function FiscalPage() {
         .eq("ano", periodo.ano)
         .is("deleted_at", null)
         .maybeSingle();
-      const { data: lanc } = await supabase
+      if (dreErr) throw dreErr;
+      const { data: lanc, error: lancErr } = await supabase
         .from("lancamentos_fiscais")
         .select("*")
         .eq("empresa_id", empresaId!)
@@ -70,6 +77,7 @@ function FiscalPage() {
         .eq("ano", periodo.ano)
         .is("deleted_at", null)
         .order("tipo");
+      if (lancErr) throw lancErr;
       return { empresa, dre, lancamentos: lanc ?? [] };
     },
   });
