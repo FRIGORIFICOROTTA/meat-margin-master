@@ -9,9 +9,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { toast } from "sonner";
 import { z } from "zod";
 import { setEmpresaSelecionada } from "@/lib/app-state";
+import { RouteErrorCard } from "@/components/RouteErrorCard";
 
 export const Route = createFileRoute("/_authenticated/onboarding")({
   component: Onboarding,
+  errorComponent: ({ error, reset }) => (
+    <RouteErrorCard error={error} reset={reset} page="onboarding" />
+  ),
 });
 
 const schema = z.object({
