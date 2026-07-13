@@ -99,7 +99,6 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
         rel: "stylesheet",
         href: appCss,
       },
-      { rel: "canonical", href: "https://dre.rotadascarnes.com/" },
     ],
     scripts: [
       {
