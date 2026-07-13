@@ -55,8 +55,77 @@ export type MemorialOpts = {
 
 const PRIMARY: [number, number, number] = [153, 60, 29]; // Meat Red
 
+/**
+ * A fonte padrão do jsPDF (Helvetica) usa codificação WinAnsi/Latin-1 e NÃO
+ * possui glifos para símbolos como − (minus U+2212), Σ, ±, →, ≥ e aspas
+ * tipográficas. Sem tratamento eles são renderizados como lixo (", £, etc.).
+ * Este sanitizador troca todo caractere fora do Latin-1 por um equivalente
+ * seguro; é aplicado a TODO texto que entra no PDF.
+ */
+const CHAR_MAP: Record<string, string> = {
+  "\u2212": "-", // − minus matemático
+  "\u2013": "-", // – en dash
+  "\u2014": "-", // — em dash
+  "\u2211": "Soma de", // ∑ n-ary summation
+  "\u03A3": "Soma de", // Σ sigma grego (o usado no código)
+  "\u00B1": "+/-", // ±
+  "\u2192": "->", // →
+  "\u2264": "<=", // ≤
+  "\u2265": ">=", // ≥
+  "\u00D7": "x", // ×
+  "\u2260": "!=", // ≠
+  "\u2248": "~", // ≈
+  "\u2022": "-", // • bullet
+  "\u2018": "'",
+  "\u2019": "'",
+  "\u201C": '"',
+  "\u201D": '"',
+  "\u2026": "...", // …
+  "\u00A0": " ", // NBSP
+};
+
+export function sanitizePdfText(s: string): string {
+  let out = "";
+  for (const ch of s) {
+    if (CHAR_MAP[ch] !== undefined) {
+      out += CHAR_MAP[ch];
+    } else if (ch.charCodeAt(0) > 255) {
+      // Fora do Latin-1 e sem mapeamento: remove o acento se possível.
+      const semAcento = ch.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      out += semAcento.charCodeAt(0) <= 255 ? semAcento : "?";
+    } else {
+      out += ch;
+    }
+  }
+  return out;
+}
+
+/** Sanitiza recursivamente linhas de tabela. */
+function sanRows(rows: string[][]): string[][] {
+  return rows.map((r) => r.map((c) => sanitizePdfText(String(c))));
+}
+
 export function exportMemorialCalculoPdf(opts: MemorialOpts) {
   const doc = new jsPDF({ unit: "pt", format: "a4" });
+
+  // Intercepta doc.text: TODO texto passa pelo sanitizador antes de ir ao PDF.
+  // Garante que nenhum símbolo fora do Latin-1 (−, Σ, ±, →) escape e vire lixo,
+  // inclusive em textos futuros adicionados ao memorial.
+  const rawText = doc.text.bind(doc);
+  (doc as unknown as { text: typeof doc.text }).text = ((
+    txt: string | string[],
+    x: number,
+    y: number,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ...rest: any[]
+  ) => {
+    const clean = Array.isArray(txt)
+      ? txt.map((t) => sanitizePdfText(String(t)))
+      : sanitizePdfText(String(txt));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (rawText as any)(clean, x, y, ...rest);
+  }) as typeof doc.text;
+
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
   const margin = 40;
@@ -89,7 +158,7 @@ export function exportMemorialCalculoPdf(opts: MemorialOpts) {
   ];
   autoTable(doc, {
     startY: y,
-    body: ident,
+    body: sanRows(ident),
     theme: "plain",
     styles: { fontSize: 9, cellPadding: 3 },
     columnStyles: { 0: { fontStyle: "bold", cellWidth: 140 } },
@@ -165,8 +234,8 @@ export function exportMemorialCalculoPdf(opts: MemorialOpts) {
   const aliqRows = aliquotasRows(opts.regime, cfg);
   autoTable(doc, {
     startY: y,
-    head: [["Parâmetro", "Valor", "Origem"]],
-    body: aliqRows,
+    head: sanRows([["Parâmetro", "Valor", "Origem"]]),
+    body: sanRows(aliqRows),
     styles: { fontSize: 9, cellPadding: 5 },
     headStyles: { fillColor: PRIMARY, textColor: 255 },
     columnStyles: { 1: { halign: "right", cellWidth: 80 }, 2: { cellWidth: 90 } },
@@ -225,8 +294,8 @@ export function exportMemorialCalculoPdf(opts: MemorialOpts) {
   ];
   autoTable(doc, {
     startY: y,
-    head: [["Descrição", "Valor", "% Receita"]],
-    body: gerLinhas,
+    head: sanRows([["Descrição", "Valor", "% Receita"]]),
+    body: sanRows(gerLinhas),
     styles: { fontSize: 9, cellPadding: 5 },
     headStyles: { fillColor: PRIMARY, textColor: 255 },
     columnStyles: { 1: { halign: "right" }, 2: { halign: "right", cellWidth: 70 } },
@@ -290,27 +359,34 @@ export function exportMemorialCalculoPdf(opts: MemorialOpts) {
   ];
   autoTable(doc, {
     startY: y,
-    body: glossario,
+    body: sanRows(glossario),
     theme: "plain",
-    styles: { fontSize: 9, cellPadding: 4 },
-    columnStyles: { 0: { fontStyle: "bold", cellWidth: 130 } },
+    styles: { fontSize: 9, cellPadding: 4, overflow: "linebreak", valign: "top" },
+    columnStyles: {
+      0: { fontStyle: "bold", cellWidth: 130 },
+      1: { cellWidth: "auto" },
+    },
+    tableWidth: pageW - margin * 2,
     margin: { left: margin, right: margin },
   });
   y = (doc as any).lastAutoTable.finalY + 20;
 
   // ---------- Parecer do contador ----------
-  y = ensureSpace(doc, y, 180, margin);
+  // Precisa de espaço para o texto + 2 linhas de campos + as 2 linhas de
+  // observação; 180pt era insuficiente e o bloco colidia com o rodapé.
+  y = ensureSpace(doc, y, 220, margin);
   y = section(doc, "8. Parecer do Contador Responsável", y);
-  doc.setFontSize(9);
-  doc.setFont("helvetica", "normal");
-  doc.text(
+  // paragraph() mede a quebra corretamente e devolve o y real da próxima linha
+  // (o doc.text com maxWidth antigo devolvia y fixo e sobrepunha os campos).
+  y = paragraph(
+    doc,
     "Confirmo que as lógicas de cálculo descritas neste memorial estão aderentes à legislação " +
       "tributária aplicável ao regime informado e ao período em análise.",
-    margin,
     y,
-    { maxWidth: pageW - 2 * margin },
+    margin,
+    pageW - 2 * margin,
   );
-  y += 30;
+  y += 18;
   const colW = (pageW - 2 * margin - 20) / 2;
   field(doc, "Nome", margin, y, colW);
   field(doc, "CRC", margin + colW + 20, y, colW);
@@ -330,24 +406,27 @@ export function exportMemorialCalculoPdf(opts: MemorialOpts) {
   for (let i = 1; i <= total; i++) {
     doc.setPage(i);
 
-    // Marca d'água diagonal discreta "ROTA DAS CARNES" no centro da página
+    // Marca d'água diagonal discreta no centro da página.
+    // Fonte menor e opacidade baixa para NÃO invadir o rodapé nem o bloco de
+    // assinatura do contador (o texto anterior, em 72pt, transbordava).
     const anyDoc = doc as unknown as {
       GState?: new (opts: { opacity: number }) => unknown;
       setGState?: (g: unknown) => void;
     };
-    if (anyDoc.GState && anyDoc.setGState) {
-      const gs = new anyDoc.GState({ opacity: 0.06 });
-      anyDoc.setGState(gs);
+    const temGState = !!(anyDoc.GState && anyDoc.setGState);
+    if (temGState) {
+      anyDoc.setGState!(new anyDoc.GState!({ opacity: 0.04 }));
     }
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(72);
+    doc.setFontSize(46);
     doc.setTextColor(...PRIMARY);
     doc.text("ROTA DAS CARNES", pageW / 2, pageH / 2, {
       align: "center",
       angle: 30,
+      baseline: "middle",
     });
-    if (anyDoc.GState && anyDoc.setGState) {
-      anyDoc.setGState(new anyDoc.GState({ opacity: 1 }));
+    if (temGState) {
+      anyDoc.setGState!(new anyDoc.GState!({ opacity: 1 }));
     }
 
     // Rodapé
@@ -390,9 +469,11 @@ function paragraph(
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
   doc.setTextColor(40);
-  const lines = doc.splitTextToSize(text, maxW);
+  // Sanitiza ANTES de medir: splitTextToSize precisa medir exatamente a string
+  // que será impressa, senão a quebra de linha sai errada e o texto é cortado.
+  const lines = doc.splitTextToSize(sanitizePdfText(text), maxW);
   doc.text(lines, x, y);
-  return y + lines.length * 11;
+  return y + lines.length * 12 + 4;
 }
 
 function formulasTable(
@@ -404,11 +485,15 @@ function formulasTable(
 ): number {
   autoTable(doc, {
     startY: y,
-    head: [["Linha", "Fórmula / Origem"]],
-    body: rows,
-    styles: { fontSize: 9, cellPadding: 5 },
+    head: sanRows([["Linha", "Fórmula / Origem"]]),
+    body: sanRows(rows),
+    styles: { fontSize: 9, cellPadding: 5, overflow: "linebreak", valign: "middle" },
     headStyles: { fillColor: PRIMARY, textColor: 255 },
-    columnStyles: { 0: { fontStyle: "bold", cellWidth: 200 } },
+    columnStyles: {
+      0: { fontStyle: "bold", cellWidth: 175 },
+      1: { cellWidth: "auto" },
+    },
+    tableWidth: pageW - margin * 2,
     margin: { left: margin, right: margin },
   });
   return (doc as any).lastAutoTable.finalY + 16;
@@ -503,8 +588,8 @@ function fiscalTable(
   ]);
   autoTable(doc, {
     startY: y,
-    head: [["Descrição", "Valor", "% Receita"]],
-    body: rows,
+    head: sanRows([["Descrição", "Valor", "% Receita"]]),
+    body: sanRows(rows),
     styles: { fontSize: 9, cellPadding: 5 },
     headStyles: { fillColor: primary, textColor: 255 },
     columnStyles: { 1: { halign: "right" }, 2: { halign: "right", cellWidth: 70 } },
