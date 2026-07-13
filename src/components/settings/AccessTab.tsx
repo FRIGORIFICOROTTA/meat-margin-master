@@ -177,5 +177,66 @@ export function AccessTab() {
         </div>
       </CardContent>
     </Card>
+
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Users className="h-5 w-5 text-primary" />
+          Usuários vinculados
+        </CardTitle>
+        <CardDescription>
+          Gerencie o papel dos usuários que já se cadastraram no seu grupo.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="p-0">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b text-xs uppercase text-muted-foreground">
+              <th className="text-left p-3">Nome</th>
+              <th className="text-left p-3">Email</th>
+              <th className="text-left p-3">Papel</th>
+              <th className="text-left p-3">Vinculado em</th>
+            </tr>
+          </thead>
+          <tbody>
+            {usersQ.isLoading && (
+              <tr><td className="p-4 text-muted-foreground" colSpan={4}>Carregando...</td></tr>
+            )}
+            {usersQ.data?.length === 0 && (
+              <tr><td className="p-4 text-muted-foreground" colSpan={4}>Nenhum usuário vinculado ainda.</td></tr>
+            )}
+            {usersQ.data?.map((u) => (
+              <tr key={u.user_id} className="border-b last:border-b-0">
+                <td className="p-3 font-medium">
+                  {u.nome ?? "—"}
+                  {u.is_owner && <Badge className="ml-2" variant="secondary">Dono</Badge>}
+                </td>
+                <td className="p-3 text-muted-foreground">{u.email}</td>
+                <td className="p-3">
+                  <Select
+                    value={u.papel}
+                    disabled={u.is_owner || updatePapelMut.isPending}
+                    onValueChange={(v) =>
+                      updatePapelMut.mutate({ user_id: u.user_id, papel: v as PapelUsuario })
+                    }
+                  >
+                    <SelectTrigger className="w-[180px]"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="admin_grupo">Admin</SelectItem>
+                      <SelectItem value="gestor_empresa">Operador</SelectItem>
+                      <SelectItem value="visualizador">Visualizador</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </td>
+                <td className="p-3 text-muted-foreground">
+                  {new Date(u.created_at).toLocaleDateString("pt-BR")}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </CardContent>
+    </Card>
+    </div>
   );
 }
