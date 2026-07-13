@@ -1,46 +1,50 @@
-## Causa do erro
+## Problema
 
-O onboarding falha com HTTP 409 na criação da empresa:
+Hoje `allowed_emails` só libera o login. Quando um convidado (ex: `alysonhbatista@gmail.com`) entra pela 1ª vez, ele não tem `usuarios_perfil` nem `usuarios_empresas` → o gate do onboarding manda ele criar um novo grupo em vez de entrar no grupo que o convidou.
 
-```
-duplicate key value violates unique constraint "empresas_cnpj_key"
-CNPJ 63667080000153 → já pertence à empresa "Nova Rota Ltda - Formosa"
-                      no grupo antigo "Grupo Rota das Carnes" (529fa05a…)
-```
+## Solução
 
-Esse CNPJ (e o 63667080000234 da Planaltina) já foi cadastrado em uma tentativa anterior. Como o `cnpj` da tabela `empresas` tem constraint UNIQUE global, qualquer novo onboarding com o mesmo CNPJ estoura 409.
+Ao autorizar um email, o sistema já sabe qual grupo é (o do admin que autorizou). No 1º login desse convidado, vamos criar automaticamente:
+- `usuarios_perfil` com `papel = 'colaborador'` e `grupo_id` do admin que autorizou
+- `usuarios_empresas` para **todas** as empresas ativas desse grupo
 
-Efeitos colaterais que também precisam ser resolvidos:
-- Cada clique em "Concluir setup" cria um `grupos` novo antes de falhar → hoje há 3 grupos órfãos "Grupo Rotta" sem empresa nem perfil vinculado.
-- A mensagem no toast só diz "Erro ao criar grupo/empresa", sem mostrar o motivo real (CNPJ duplicado).
+Assim ele cai direto no dashboard vendo Formosa + Planaltina.
 
-## O que fazer
+## Passos
 
-### 1. Limpar o estado sujo do banco
-- Apagar os 3 grupos órfãos criados hoje (`7f4f399f…`, `9fc51a9e…`, `f799cb6e…`) — nenhum tem empresa/perfil vinculado.
-- Decidir o que fazer com o grupo antigo "Grupo Rota das Carnes" (`529fa05a…`) que já contém as empresas Formosa + Planaltina do mesmo owner. Duas opções:
-  - **(A) Reaproveitar**: renomear para "Grupo Rotta", criar `usuarios_perfil` do owner apontando pra ele, e mandar direto para `/dashboard`. Não precisa refazer onboarding.
-  - **(B) Recomeçar do zero**: apagar as empresas antigas + o grupo antigo, e deixar o onboarding rodar limpo.
+### 1. Migração no Supabase
 
-### 2. Corrigir o formulário de onboarding
-- **Remover o campo "Regime de DRE"** conforme pedido. A tabela `empresas.regime_tributario` já tem default `'gerencial'`, e as duas visões (Gerencial e Lucro Real) ficam disponíveis por padrão no DRE.
-- Melhorar a mensagem de erro: detectar código Postgres `23505` no CNPJ e mostrar "Já existe uma empresa cadastrada com este CNPJ. Peça acesso ao administrador ou use outro CNPJ."
-- Envolver as 4 operações (grupo → perfil → empresa → vínculo) de forma que, se qualquer passo posterior falhar, **o grupo recém-criado seja apagado** — evita voltar a gerar órfãos.
-- Trim/normalização do CNPJ (só dígitos) antes de enviar, pra evitar duplicatas por formatação.
+- Garantir que `allowed_emails.added_by` (uuid do admin) esteja preenchido — já está no seu caso.
+- Criar função `public.link_invited_user()` (SECURITY DEFINER) que:
+  1. Recebe o `user_id` autenticado atual (`auth.uid()`) e o email do JWT.
+  2. Procura em `allowed_emails` pelo email (case-insensitive).
+  3. Se achar e `added_by` existir, pega o `grupo_id` do owner e:
+     - Faz `INSERT ... ON CONFLICT DO NOTHING` em `usuarios_perfil` (`papel='colaborador'`, `nome` = do metadata do Google se houver, senão email).
+     - Faz `INSERT ... ON CONFLICT DO NOTHING` em `usuarios_empresas` para toda empresa ativa (`deleted_at IS NULL`) do grupo.
+  4. Retorna `{ grupo_id, empresas_vinculadas }` ou `null` se não houver convite.
+- Grants: `EXECUTE ... TO authenticated`.
 
-### 3. Onboarding para o segundo usuário
-O onboarding só deveria rodar para quem cria o grupo. O segundo usuário (adicionado via Configurações → Acessos) já entra via convite e não deve ver a tela de onboarding — ele deve ser mandado para `/dashboard` (ou uma tela "aguardando vínculo de empresa" se ainda não tiver `usuarios_empresas`). Esse gate precisa existir no `_authenticated/route.tsx` ou no próprio `onboarding.tsx` (checar se já existe `usuarios_perfil` para o user → se sim, redirecionar).
+### 2. Onboarding gate
 
-## Decisões pendentes (preciso da sua resposta)
+No `src/routes/_authenticated/onboarding.tsx`, dentro do `useEffect` de gate, ANTES de decidir mostrar o formulário:
+- Chamar `supabase.rpc('link_invited_user')`.
+- Se retornar dados (foi vinculado), setar `empresaSelecionada` na primeira empresa retornada e `router.navigate({ to: '/dashboard' })`.
+- Se retornar null, continuar com a lógica atual (perfil? → dashboard; senão → mostra form de criar grupo).
 
-1. **Grupo antigo "Grupo Rota das Carnes" com as empresas Formosa + Planaltina já cadastradas**: reaproveitar (opção A) ou apagar tudo e recomeçar (opção B)?
-2. Confirmação: quero remover totalmente o campo "Regime de DRE" do onboarding e deixar o default `gerencial` no banco, certo?
+Isso resolve para novos convidados sem precisar mudar o fluxo de auth global.
 
-## Detalhes técnicos
+### 3. Corrigir Alyson agora (dados existentes)
 
-Arquivos afetados:
-- `src/routes/_authenticated/onboarding.tsx` — remover campo Select de regime, adicionar tratamento de erro `23505`, adicionar rollback do grupo criado, normalizar CNPJ, checar se usuário já tem perfil e pular onboarding.
-- Migração SQL — limpar grupos órfãos (e, se opção B, também empresas + grupo antigo).
-- (opcional) `src/routes/_authenticated/route.tsx` ou loader do onboarding — redirecionar quem já tem `usuarios_perfil` diretamente para `/dashboard`.
+Rodar um insert manual para vincular `alysonhbatista@gmail.com` (`2a9432c9-…`) ao grupo `Grupo Rota das Carnes` (`529fa05a-…`):
+- `usuarios_perfil`: nome "Alyson Batista", papel `colaborador`, grupo_id do grupo Rota
+- `usuarios_empresas`: linhas para Formosa (`e987a555…`) e Planaltina (`d5759116…`)
 
-Nenhuma mudança de schema é necessária — a constraint UNIQUE no `cnpj` faz sentido e deve continuar.
+Depois disso ela consegue fazer logout/login e cair direto no dashboard.
+
+### 4. UX opcional (não vou fazer agora, só sinalizando)
+
+O `AccessTab` mostra a lista de emails autorizados mas não indica se cada um já se cadastrou/vinculou. Se você quiser, num próximo passo posso adicionar uma coluna "Status: pendente / vinculado".
+
+## Decisões pendentes
+
+Nenhuma — respostas já coletadas (todas empresas do grupo + papel `colaborador`).

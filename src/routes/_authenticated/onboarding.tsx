@@ -53,6 +53,7 @@ function Onboarding() {
   useEffect(() => {
     if (!user) return;
     (async () => {
+      // 1) Se já tem perfil/vínculo, pula direto pro dashboard.
       const [{ data: perfil }, { data: vinculos }] = await Promise.all([
         supabase.from("usuarios_perfil").select("user_id").eq("user_id", user.id).maybeSingle(),
         supabase.from("usuarios_empresas").select("empresa_id").eq("user_id", user.id).limit(1),
@@ -62,6 +63,16 @@ function Onboarding() {
         router.navigate({ to: "/dashboard" });
         return;
       }
+      // 2) Sem perfil: verifica se é um email convidado por um admin.
+      //    Se for, cria perfil + vínculos automaticamente e vai pro dashboard.
+      const { data: linked } = await supabase.rpc("link_invited_user");
+      const empresas = (linked as { empresas?: string[] } | null)?.empresas;
+      if (empresas && empresas.length > 0) {
+        setEmpresaSelecionada(empresas[0]);
+        router.navigate({ to: "/dashboard" });
+        return;
+      }
+      // 3) Não é convidado: mostra o formulário para criar o próprio grupo.
       setChecking(false);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
