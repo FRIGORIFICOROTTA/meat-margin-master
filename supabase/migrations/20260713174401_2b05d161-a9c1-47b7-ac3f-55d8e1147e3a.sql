@@ -1,0 +1,1 @@
+UPDATE public.empresas SET nome = 'NOVA ROTA LTDA - FORMOSA' WHERE id = 'e987a555-80c9-47a9-a80d-0bf619e3cc7b';
